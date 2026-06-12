@@ -9,6 +9,8 @@ const app        = express();
 const ODDS_KEY   = process.env.ODDS_API_KEY  || "";
 const CLAUDE_KEY = process.env.CLAUDE_API_KEY || "";
 const PORT       = parseInt(process.env.PORT  || "3747");
+const TG_TOKEN   = process.env.TELEGRAM_BOT_TOKEN || "";
+const TG_CHAT_ID = process.env.TELEGRAM_CHAT_ID   || "";
 
 app.use(express.json());
 
@@ -215,8 +217,50 @@ async function generatePicks(games) {
 
   const parsed = JSON.parse(raw.slice(s, e + 1));
   if (!parsed.bets?.length) throw new Error("No bets in response");
+
+  // Attach each game's real start time so we can schedule pre-game alerts
+  for (const bet of parsed.bets) {
+    const game = games.find(g => `${g.away} @ ${g.home}` === bet.matchup);
+    if (game) bet.commenceTime = game.time;
+  }
   return parsed;
 }
+
+// ─── TELEGRAM ALERTS ──────────────────────────────────────────────────────────
+async function sendTelegram(text) {
+  if (!TG_TOKEN || !TG_CHAT_ID) return;
+  try {
+    await fetchJson(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+      method: "POST",
+      body: JSON.stringify({ chat_id: TG_CHAT_ID, text, parse_mode: "Markdown" }),
+    });
+  } catch (e) {
+    console.warn("[telegram] send failed:", e.message);
+  }
+}
+
+let latestPicks = null;     // most recently generated picks, with commenceTime per bet
+const alertedBets = new Set(); // keys of bets we've already alerted on, "date|matchup|bet"
+
+setInterval(() => {
+  if (!latestPicks?.bets?.length) return;
+  const now = Date.now();
+  for (const bet of latestPicks.bets) {
+    if (!bet.commenceTime) continue;
+    const key = `${latestPicks.date}|${bet.matchup}|${bet.bet}`;
+    if (alertedBets.has(key)) continue;
+
+    const msUntil = new Date(bet.commenceTime).getTime() - now;
+    if (msUntil <= 10 * 60 * 1000 && msUntil > 9 * 60 * 1000) {
+      alertedBets.add(key);
+      sendTelegram(
+        `⏰ *${bet.matchup}* starts in ~10 min\n` +
+        `🔒 ${bet.bet} @ ${bet.book} ${bet.odds} (${bet.signal}, ${bet.ev} EV)\n` +
+        `Sync closing lines on Curly Locks now for accurate CLV.`
+      );
+    }
+  }
+}, 60 * 1000);
 
 // ─── ROUTES ───────────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => {
@@ -239,6 +283,7 @@ app.get("/api/picks", async (req, res) => {
     if (!games.length) return res.status(404).json({ error: "No games with full odds today. Lines may not be posted yet — try again later." });
     const picks = await generatePicks(games);
     console.log("[picks] ✓ Done");
+    latestPicks = picks;
     res.json(picks);
   } catch (e) {
     console.error("[picks] Error:", e.message);
