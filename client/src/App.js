@@ -385,9 +385,12 @@ export default function App() {
     } catch(e) {
       setError(e.message);
     }
-    setLanded([0,1,2].map(() => Math.floor(Math.random() * SLOT_SYMBOLS.length)));
+    setLanded([0, 1, 2].map(i => {
+      const reelSymbols = [...SLOT_SYMBOLS.slice(i * 2), ...SLOT_SYMBOLS.slice(0, i * 2)];
+      return reelSymbols.indexOf("7️⃣");
+    }));
     setStatus("stopping");
-    setTimeout(() => setStatus("done"), 700);
+    setTimeout(() => setStatus("done"), 2000);
   }
 
   function addToRecord(bet, date) {
@@ -477,7 +480,7 @@ export default function App() {
                     animation: stopping ? "none" : `slotSpin ${dur}s linear infinite`,
                     animationDelay: stopping ? undefined : `-${(i * 0.17).toFixed(2)}s`,
                     transform: stopping ? `translateY(-${landed[i] * 52}px)` : undefined,
-                    transition: stopping ? `transform ${0.5 + i * 0.18}s cubic-bezier(0.15,0.8,0.25,1)` : undefined,
+                    transition: stopping ? `transform 0.7s cubic-bezier(0.15,0.8,0.25,1) ${i * 0.6}s` : undefined,
                   }}>
                     {[...reelSymbols, ...reelSymbols].map((sym, j) => (
                       <div key={j} style={{ height:52, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26 }}>{sym}</div>
