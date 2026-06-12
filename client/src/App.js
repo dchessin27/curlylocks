@@ -51,6 +51,7 @@ function calcCLVStats(picks) {
 const SC  = { NFL:"#c8a84b", NBA:"#e85d3a", MLB:"#4aade8", NHL:"#7ecfcf" };
 const SI  = { NFL:"🏈", NBA:"🏀", MLB:"⚾", NHL:"🏒" };
 const SGC = { EV:"#c8a84b", STEAM:"#ff8866", RLM:"#aa88ff", ARB:"#22ff99" };
+const SLOT_SYMBOLS = ["🔒","7️⃣","🍒","💰","⭐","🍀"];
 const RM  = [
   { label:"LOCK #1", emoji:"🥇", border:"#c8a84b", glow:"#c8a84b33" },
   { label:"LOCK #2", emoji:"🥈", border:"#888",    glow:"#88888822" },
@@ -428,7 +429,7 @@ export default function App() {
 
   return (
     <div style={{ minHeight:"100vh", background:"#07070f", color:"#c0c0e0", display:"flex", flexDirection:"column", alignItems:"center", fontFamily:"'DM Mono',monospace" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;700;800&family=DM+Mono:wght@400;500&display=swap'); *{box-sizing:border-box;margin:0;padding:0} @keyframes spin{to{transform:rotate(360deg)}} @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}} button:hover{opacity:0.85}`}</style>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;700;800&family=DM+Mono:wght@400;500&display=swap'); *{box-sizing:border-box;margin:0;padding:0} @keyframes spin{to{transform:rotate(360deg)}} @keyframes slotSpin{from{transform:translateY(0)}to{transform:translateY(-50%)}} @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}} button:hover{opacity:0.85}`}</style>
 
       {/* HEADER */}
       <div style={{ width:"100%", maxWidth:540, padding:"24px 20px 0" }}>
@@ -462,7 +463,17 @@ export default function App() {
       <div style={{ width:"100%", maxWidth:540, padding:"14px 20px 44px", display:"flex", flexDirection:"column", gap:14 }}>
 
         {status==="loading" && <div style={{ display:"flex", flexDirection:"column", alignItems:"center", padding:"70px 0", gap:14, color:"#445566" }}>
-          <div style={{ fontSize:30, animation:"spin 1s linear infinite" }}>⟳</div>
+          <div style={{ display:"flex", gap:6, background:"#0c0c18", border:"1px solid #c8a84b44", borderRadius:8, padding:"8px 10px", boxShadow:"0 0 18px #c8a84b22" }}>
+            {[0.3, 0.45, 0.6].map((dur, i) => (
+              <div key={i} style={{ width:42, height:52, overflow:"hidden", borderRadius:5, background:"#07070f", border:"1px solid #2a2a3e" }}>
+                <div style={{ display:"flex", flexDirection:"column", animation:`slotSpin ${dur}s linear infinite` }}>
+                  {[...SLOT_SYMBOLS, ...SLOT_SYMBOLS].map((sym, j) => (
+                    <div key={j} style={{ height:52, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26 }}>{sym}</div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
           <div style={{ fontSize:11, letterSpacing:1 }}>PULLING LIVE ODDS</div>
           <div style={{ fontSize:9, color:"#334455" }}>Odds API → EV calc → Claude picks</div>
         </div>}
