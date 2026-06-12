@@ -394,6 +394,9 @@ export default function App() {
   }
   function settle(id, result)  { const u = record.map(p => p.id===id ? {...p,result} : p); setRecord(u); saveRecord(u); }
   function deletePick(id)      { const u = record.filter(p => p.id!==id); setRecord(u); saveRecord(u); }
+  function removeFromRecord(bet, date) {
+    const u = record.filter(p => !(p.bet===bet.bet && p.date===date)); setRecord(u); saveRecord(u);
+  }
 
   async function syncClosingLines() {
     const targets = record.filter(p => (p.closingLine===null || p.closingLine===undefined) && p.home && p.away);
@@ -486,7 +489,7 @@ export default function App() {
                 </div>
                 <div style={{ display:"flex", gap:6, alignItems:"center" }}>
                   <span style={{ background:sgc+"20", color:sgc, border:`1px solid ${sgc}44`, borderRadius:4, padding:"2px 7px", fontSize:9, fontWeight:700, letterSpacing:1 }}>{bet.signal}</span>
-                  <button onClick={() => !logged && addToRecord(bet, data.date)} style={{ background:logged?"#22ff9914":"#c8a84b14", border:`1px solid ${logged?"#22ff9944":"#c8a84b44"}`, color:logged?"#22ff99":"#c8a84b", borderRadius:4, padding:"2px 8px", cursor:logged?"default":"pointer", fontSize:9, fontFamily:"'DM Mono',monospace" }}>{logged?"✓ logged":"+ log"}</button>
+                  <button onClick={() => logged ? removeFromRecord(bet, data.date) : addToRecord(bet, data.date)} style={{ background:logged?"#22ff9914":"#c8a84b14", border:`1px solid ${logged?"#22ff9944":"#c8a84b44"}`, color:logged?"#22ff99":"#c8a84b", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:9, fontFamily:"'DM Mono',monospace" }}>{logged?"✓ logged":"+ log"}</button>
                 </div>
               </div>
               <div style={{ background:rm.border+"10", border:`1px solid ${rm.border}33`, borderRadius:8, padding:"11px 13px", marginBottom:12 }}>
