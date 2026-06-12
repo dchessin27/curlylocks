@@ -464,15 +464,18 @@ export default function App() {
 
         {status==="loading" && <div style={{ display:"flex", flexDirection:"column", alignItems:"center", padding:"70px 0", gap:14, color:"#445566" }}>
           <div style={{ display:"flex", gap:6, background:"#0c0c18", border:"1px solid #c8a84b44", borderRadius:8, padding:"8px 10px", boxShadow:"0 0 18px #c8a84b22" }}>
-            {[0.3, 0.45, 0.6].map((dur, i) => (
-              <div key={i} style={{ width:42, height:52, overflow:"hidden", borderRadius:5, background:"#07070f", border:"1px solid #2a2a3e" }}>
-                <div style={{ display:"flex", flexDirection:"column", animation:`slotSpin ${dur}s linear infinite` }}>
-                  {[...SLOT_SYMBOLS, ...SLOT_SYMBOLS].map((sym, j) => (
-                    <div key={j} style={{ height:52, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26 }}>{sym}</div>
-                  ))}
+            {[0.37, 0.53, 0.71].map((dur, i) => {
+              const reelSymbols = [...SLOT_SYMBOLS.slice(i * 2), ...SLOT_SYMBOLS.slice(0, i * 2)];
+              return (
+                <div key={i} style={{ width:42, height:52, overflow:"hidden", borderRadius:5, background:"#07070f", border:"1px solid #2a2a3e" }}>
+                  <div style={{ display:"flex", flexDirection:"column", animation:`slotSpin ${dur}s linear infinite`, animationDelay:`-${(i * 0.17).toFixed(2)}s` }}>
+                    {[...reelSymbols, ...reelSymbols].map((sym, j) => (
+                      <div key={j} style={{ height:52, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26 }}>{sym}</div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <div style={{ fontSize:11, letterSpacing:1 }}>PULLING LIVE ODDS</div>
           <div style={{ fontSize:9, color:"#334455" }}>Odds API → EV calc → Claude picks</div>
