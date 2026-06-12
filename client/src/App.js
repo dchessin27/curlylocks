@@ -33,6 +33,20 @@ function calcStats(picks) {
 }
 const groupBy = (picks, key) => picks.reduce((acc, p) => { const k = p[key]||"?"; if (!acc[k]) acc[k]=[]; acc[k].push(p); return acc; }, {});
 
+// CLV = how much better our price was vs. the closing line, in %.
+// Positive = we beat the close (got a better number before the market moved).
+const calcCLV = p => {
+  if (p.closingLine === null || p.closingLine === undefined || p.closingLine === "") return null;
+  return ((oddsToDecimal(p.odds) / oddsToDecimal(p.closingLine)) - 1) * 100;
+};
+function calcCLVStats(picks) {
+  const withClose = picks.map(p => ({ p, clv: calcCLV(p) })).filter(x => x.clv !== null);
+  if (!withClose.length) return null;
+  const avg = withClose.reduce((acc, x) => acc + x.clv, 0) / withClose.length;
+  const beat = withClose.filter(x => x.clv > 0).length;
+  return { count: withClose.length, avgCLV: avg.toFixed(2), beatPct: ((beat / withClose.length) * 100).toFixed(0) };
+}
+
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const SC  = { NFL:"#c8a84b", NBA:"#e85d3a", MLB:"#4aade8", NHL:"#7ecfcf" };
 const SI  = { NFL:"🏈", NBA:"🏀", MLB:"⚾", NHL:"🏒" };
@@ -85,7 +99,30 @@ function ScoreRow({ label, picks, color, bankroll, unitPct=1 }) {
 }
 
 // ─── RECORD TAB ───────────────────────────────────────────────────────────────
-function RecordTab({ record, bankroll, unitPct, onSettle, onDelete }) {
+function ClosingLineInput({ pick, onSetClosingLine }) {
+  const [val, setVal] = useState(pick.closingLine === null || pick.closingLine === undefined ? "" : fmtOdds(pick.closingLine));
+  const clv = calcCLV(pick);
+  const commit = () => onSetClosingLine(pick.id, val.trim());
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+      <input
+        value={val}
+        onChange={e => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === "Enter") { commit(); e.target.blur(); } }}
+        placeholder="CL"
+        style={{ width:46, background:"#0a0a14", border:"1px solid #2a2a3e", borderRadius:4, color:"#e0e0f8", padding:"3px 5px", fontSize:9, fontFamily:"'DM Mono',monospace", outline:"none", textAlign:"center" }}
+      />
+      {clv !== null && (
+        <span style={{ fontSize:9, fontWeight:700, color: clv>=0 ? "#22ff99":"#ff5544" }}>
+          {clv>=0?"+":""}{clv.toFixed(1)}% CLV
+        </span>
+      )}
+    </div>
+  );
+}
+
+function RecordTab({ record, bankroll, unitPct, onSettle, onDelete, onSetClosingLine }) {
   const [view, setView] = useState("overview");
   const overall  = calcStats(record);
   const bySport  = groupBy(record, "sport");
@@ -93,6 +130,8 @@ function RecordTab({ record, bankroll, unitPct, onSettle, onDelete }) {
   const pending  = record.filter(p => p.result === "pending");
   const settled  = [...record].filter(p => p.result !== "pending").reverse();
   const rc = !overall || overall.roi===null ? "#c8a84b" : parseFloat(overall.roi)>=0 ? "#22ff99" : "#ff5544";
+  const clvStats = calcCLVStats(record);
+  const clvc = clvStats && parseFloat(clvStats.avgCLV)>=0 ? "#22ff99" : "#ff5544";
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
@@ -139,6 +178,20 @@ function RecordTab({ record, bankroll, unitPct, onSettle, onDelete }) {
                 </div>
               )}
 
+              {clvStats && (
+                <div style={{ background:"#0c0c18", border:`1px solid ${clvc}33`, borderRadius:8, padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div>
+                    <div style={{ fontSize:9, color:"#445566", letterSpacing:1, marginBottom:4 }}>AVG CLOSING LINE VALUE</div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:26, fontWeight:800, color:clvc }}>{parseFloat(clvStats.avgCLV)>=0?"+":""}{clvStats.avgCLV}%</div>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ fontSize:9, color:"#445566", marginBottom:4 }}>BEAT CLOSE</div>
+                    <div style={{ fontSize:14, color:clvc, fontWeight:700 }}>{clvStats.beatPct}%</div>
+                    <div style={{ fontSize:8, color:"#334455", marginTop:2 }}>{clvStats.count} picks tracked</div>
+                  </div>
+                </div>
+              )}
+
               {overall.hitRate && (
                 <div style={{ background:"#0c0c18", border:"1px solid #1a1a2e", borderRadius:8, padding:"12px 14px" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", fontSize:9, color:"#445566", marginBottom:8 }}>
@@ -161,12 +214,13 @@ function RecordTab({ record, bankroll, unitPct, onSettle, onDelete }) {
                 <div>
                   <div style={{ fontSize:9, color:"#c8a84b", letterSpacing:1, marginBottom:8 }}>PENDING ({pending.length})</div>
                   {pending.map(p => (
-                    <div key={p.id} style={{ background:"#0c0c18", border:"1px solid #1a1a2e", borderRadius:7, padding:"10px 12px", marginBottom:6, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                      <div>
+                    <div key={p.id} style={{ background:"#0c0c18", border:"1px solid #1a1a2e", borderRadius:7, padding:"10px 12px", marginBottom:6, display:"flex", justifyContent:"space-between", alignItems:"center", gap:10 }}>
+                      <div style={{ minWidth:0 }}>
                         <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:14, fontWeight:700, color:"#e0e0f8" }}>{p.bet}</div>
                         <div style={{ fontSize:9, color:"#445566", marginTop:2 }}>{p.book} {fmtOdds(p.odds)} · {p.sport} · {p.date}</div>
+                        <div style={{ marginTop:5 }}><ClosingLineInput pick={p} onSetClosingLine={onSetClosingLine} /></div>
                       </div>
-                      <div style={{ display:"flex", gap:5 }}>
+                      <div style={{ display:"flex", gap:5, flexShrink:0 }}>
                         {["win","loss","push"].map(r => (
                           <button key={r} onClick={() => onSettle(p.id, r)} style={{ background:r==="win"?"#22ff9920":r==="loss"?"#ff554420":"#44444420", border:`1px solid ${r==="win"?"#22ff9944":r==="loss"?"#ff554444":"#44444444"}`, color:r==="win"?"#22ff99":r==="loss"?"#ff5544":"#888", borderRadius:3, padding:"4px 9px", cursor:"pointer", fontSize:9 }}>{r.toUpperCase()}</button>
                         ))}
@@ -225,6 +279,7 @@ function RecordTab({ record, bankroll, unitPct, onSettle, onDelete }) {
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:14, fontWeight:700, color:isWin?"#22ff99":isLoss?"#ff7766":"#888" }}>{p.bet}</div>
                   <div style={{ fontSize:9, color:"#445566", marginTop:2 }}>{SI[p.sport]} {p.sport} · {p.signal} · {p.book} {fmtOdds(p.odds)} · {p.date}</div>
+                  <div style={{ marginTop:5 }}><ClosingLineInput pick={p} onSetClosingLine={onSetClosingLine} /></div>
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0, marginLeft:10 }}>
                   <div style={{ textAlign:"right" }}>
@@ -337,11 +392,16 @@ export default function App() {
   }
 
   function addToRecord(bet, date) {
-    const entry = { id: Date.now()+Math.random(), date, bet:bet.bet, sport:bet.sport, signal:bet.signal, book:bet.book, odds:parseOdds(bet.odds), ev:bet.ev, confidence:bet.confidence, matchup:bet.matchup, result:"pending" };
+    const entry = { id: Date.now()+Math.random(), date, bet:bet.bet, sport:bet.sport, signal:bet.signal, book:bet.book, odds:parseOdds(bet.odds), ev:bet.ev, confidence:bet.confidence, matchup:bet.matchup, result:"pending", closingLine:null };
     const u = [entry, ...record]; setRecord(u); saveRecord(u);
   }
   function settle(id, result)  { const u = record.map(p => p.id===id ? {...p,result} : p); setRecord(u); saveRecord(u); }
   function deletePick(id)      { const u = record.filter(p => p.id!==id); setRecord(u); saveRecord(u); }
+  function setClosingLine(id, value) {
+    const parsed = parseOdds(value);
+    const cl = value === "" || parsed === 0 ? null : parsed;
+    const u = record.map(p => p.id===id ? {...p, closingLine:cl} : p); setRecord(u); saveRecord(u);
+  }
   function saveSettingsHandler(br, up) { const s={bankroll:br,unitPct:up}; setSettings(s); saveSettings(s); }
 
   const pendingCount = record.filter(p => p.result==="pending").length;
@@ -427,7 +487,7 @@ export default function App() {
           );
         })}
 
-        {status==="done" && tab==="record"   && <RecordTab record={record} bankroll={bankroll} unitPct={unitPct} onSettle={settle} onDelete={deletePick} />}
+        {status==="done" && tab==="record"   && <RecordTab record={record} bankroll={bankroll} unitPct={unitPct} onSettle={settle} onDelete={deletePick} onSetClosingLine={setClosingLine} />}
         {                   tab==="settings" && <SettingsPanel bankroll={bankroll} unitPct={unitPct} onSave={saveSettingsHandler} />}
 
         {status==="done" && <div style={{ textAlign:"center", fontSize:9, color:"#1a1a2e", lineHeight:1.9, marginTop:4 }}>
