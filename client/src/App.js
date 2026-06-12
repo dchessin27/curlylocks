@@ -387,7 +387,7 @@ export default function App() {
     }
     setLanded([0, 1, 2].map(i => {
       const reelSymbols = [...SLOT_SYMBOLS.slice(i * 2), ...SLOT_SYMBOLS.slice(0, i * 2)];
-      return reelSymbols.indexOf("7️⃣");
+      return reelSymbols.indexOf(SLOT_SYMBOLS[1]);
     }));
     setStatus("stopping");
     setTimeout(() => setStatus("done"), 2000);
