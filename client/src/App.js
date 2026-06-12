@@ -364,6 +364,7 @@ function SettingsPanel({ bankroll, unitPct, onSave }) {
 export default function App() {
   const [tab,      setTab]      = useState("bets");
   const [status,   setStatus]   = useState("loading");
+  const [landed,   setLanded]   = useState([0, 0, 0]);
   const [data,     setData]     = useState(null);
   const [error,    setError]    = useState(null);
   const [record,   setRecord]   = useState(() => loadRecord());
@@ -384,7 +385,9 @@ export default function App() {
     } catch(e) {
       setError(e.message);
     }
-    setStatus("done");
+    setLanded([0,1,2].map(() => Math.floor(Math.random() * SLOT_SYMBOLS.length)));
+    setStatus("stopping");
+    setTimeout(() => setStatus("done"), 700);
   }
 
   function addToRecord(bet, date) {
@@ -445,7 +448,7 @@ export default function App() {
               {overall.wins}W-{overall.losses}L · {parseFloat(overall.roi||0)>=0?"+":""}{overall.roi}% ROI<br/>
               <span style={{ fontSize:8, color:"#556677" }}>P&L {fmtDollars(unitsToDollars(parseFloat(overall.pl||0), bankroll, unitPct))}</span>
             </div>}
-            <button onClick={load} disabled={status==="loading"} style={{ background:"none", border:"1px solid #1a1a2e", color:"#445566", borderRadius:6, padding:"4px 12px", cursor:status==="loading"?"not-allowed":"pointer", fontSize:10, opacity:status==="loading"?0.4:1, fontFamily:"'DM Mono',monospace" }}>{status==="loading"?"…":"⟳ refresh"}</button>
+            <button onClick={load} disabled={status!=="done"} style={{ background:"none", border:"1px solid #1a1a2e", color:"#445566", borderRadius:6, padding:"4px 12px", cursor:status!=="done"?"not-allowed":"pointer", fontSize:10, opacity:status!=="done"?0.4:1, fontFamily:"'DM Mono',monospace" }}>{status!=="done"?"…":"⟳ refresh"}</button>
           </div>
         </div>
 
@@ -462,13 +465,20 @@ export default function App() {
       {/* BODY */}
       <div style={{ width:"100%", maxWidth:540, padding:"14px 20px 44px", display:"flex", flexDirection:"column", gap:14 }}>
 
-        {status==="loading" && <div style={{ display:"flex", flexDirection:"column", alignItems:"center", padding:"70px 0", gap:14, color:"#445566" }}>
+        {(status==="loading" || status==="stopping") && <div style={{ display:"flex", flexDirection:"column", alignItems:"center", padding:"70px 0", gap:14, color:"#445566" }}>
           <div style={{ display:"flex", gap:6, background:"#0c0c18", border:"1px solid #c8a84b44", borderRadius:8, padding:"8px 10px", boxShadow:"0 0 18px #c8a84b22" }}>
             {[0.37, 0.53, 0.71].map((dur, i) => {
               const reelSymbols = [...SLOT_SYMBOLS.slice(i * 2), ...SLOT_SYMBOLS.slice(0, i * 2)];
+              const stopping = status === "stopping";
               return (
                 <div key={i} style={{ width:42, height:52, overflow:"hidden", borderRadius:5, background:"#07070f", border:"1px solid #2a2a3e" }}>
-                  <div style={{ display:"flex", flexDirection:"column", animation:`slotSpin ${dur}s linear infinite`, animationDelay:`-${(i * 0.17).toFixed(2)}s` }}>
+                  <div style={{
+                    display:"flex", flexDirection:"column",
+                    animation: stopping ? "none" : `slotSpin ${dur}s linear infinite`,
+                    animationDelay: stopping ? undefined : `-${(i * 0.17).toFixed(2)}s`,
+                    transform: stopping ? `translateY(-${landed[i] * 52}px)` : undefined,
+                    transition: stopping ? `transform ${0.5 + i * 0.18}s cubic-bezier(0.15,0.8,0.25,1)` : undefined,
+                  }}>
                     {[...reelSymbols, ...reelSymbols].map((sym, j) => (
                       <div key={j} style={{ height:52, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26 }}>{sym}</div>
                     ))}
@@ -477,7 +487,7 @@ export default function App() {
               );
             })}
           </div>
-          <div style={{ fontSize:11, letterSpacing:1 }}>PULLING LIVE ODDS</div>
+          <div style={{ fontSize:11, letterSpacing:1 }}>{status==="stopping" ? "LOCKING IN PICKS" : "PULLING LIVE ODDS"}</div>
           <div style={{ fontSize:9, color:"#334455" }}>Odds API → EV calc → Claude picks</div>
         </div>}
 
