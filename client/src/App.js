@@ -11,6 +11,7 @@ const saveSettings = s  => localStorage.setItem(SETTINGS_KEY, JSON.stringify(s))
 
 // ─── MATH ─────────────────────────────────────────────────────────────────────
 const parseOdds = v => { const n = parseInt(String(v).replace(/[−–—]/g, "-").replace(/[^0-9\-+]/g, ""), 10); return isNaN(n) ? 0 : n; };
+const fmtOdds = v => { const n = parseOdds(v); return n > 0 ? `+${n}` : `${n}`; };
 const oddsToDecimal = o => { const n = parseOdds(o); return n > 0 ? n / 100 + 1 : 100 / Math.abs(n) + 1; };
 const pickPL = p => p.result === "win" ? (oddsToDecimal(p.odds) - 1) * 100 : p.result === "loss" ? -100 : 0;
 const unitsToDollars = (u, b, p = 1) => (u * p / 100) * b;
@@ -163,7 +164,7 @@ function RecordTab({ record, bankroll, unitPct, onSettle, onDelete }) {
                     <div key={p.id} style={{ background:"#0c0c18", border:"1px solid #1a1a2e", borderRadius:7, padding:"10px 12px", marginBottom:6, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                       <div>
                         <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:14, fontWeight:700, color:"#e0e0f8" }}>{p.bet}</div>
-                        <div style={{ fontSize:9, color:"#445566", marginTop:2 }}>{p.book} {p.odds} · {p.sport} · {p.date}</div>
+                        <div style={{ fontSize:9, color:"#445566", marginTop:2 }}>{p.book} {fmtOdds(p.odds)} · {p.sport} · {p.date}</div>
                       </div>
                       <div style={{ display:"flex", gap:5 }}>
                         {["win","loss","push"].map(r => (
@@ -223,7 +224,7 @@ function RecordTab({ record, bankroll, unitPct, onSettle, onDelete }) {
               <div key={p.id} style={{ background:"#0c0c18", border:`1px solid ${isWin?"#22ff9933":isLoss?"#ff554433":"#1a1a2e"}`, borderLeft:`3px solid ${isWin?"#22ff99":isLoss?"#ff5544":"#445566"}`, borderRadius:7, padding:"10px 13px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:14, fontWeight:700, color:isWin?"#22ff99":isLoss?"#ff7766":"#888" }}>{p.bet}</div>
-                  <div style={{ fontSize:9, color:"#445566", marginTop:2 }}>{SI[p.sport]} {p.sport} · {p.signal} · {p.book} {p.odds} · {p.date}</div>
+                  <div style={{ fontSize:9, color:"#445566", marginTop:2 }}>{SI[p.sport]} {p.sport} · {p.signal} · {p.book} {fmtOdds(p.odds)} · {p.date}</div>
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0, marginLeft:10 }}>
                   <div style={{ textAlign:"right" }}>
@@ -415,7 +416,7 @@ export default function App() {
               <div style={{ background:rm.border+"10", border:`1px solid ${rm.border}33`, borderRadius:8, padding:"11px 13px", marginBottom:12 }}>
                 <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:22, fontWeight:800, color:"#e8e8ff", marginBottom:8 }}>🔒 {bet.bet}</div>
                 <div style={{ display:"flex", gap:18, flexWrap:"wrap" }}>
-                  {[{l:"BOOK",v:bet.book,c:bet.book==="DraftKings"?"#c8a84b":"#4a9fff"},{l:"ODDS",v:bet.odds,c:"#e0e0f8"},{l:"EDGE",v:bet.ev,c:"#22ff99"},{l:"CONFIDENCE",v:conf+"%",c:sc}].map(s => (
+                  {[{l:"BOOK",v:bet.book,c:bet.book==="DraftKings"?"#c8a84b":"#4a9fff"},{l:"ODDS",v:fmtOdds(bet.odds),c:"#e0e0f8"},{l:"EDGE",v:bet.ev,c:"#22ff99"},{l:"CONFIDENCE",v:conf+"%",c:sc}].map(s => (
                     <div key={s.l}><div style={{ fontSize:8, color:"#445566", marginBottom:3, letterSpacing:1 }}>{s.l}</div><div style={{ fontSize:13, fontWeight:700, color:s.c }}>{s.v}</div></div>
                   ))}
                 </div>
