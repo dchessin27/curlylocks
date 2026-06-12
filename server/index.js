@@ -129,6 +129,33 @@ async function fetchTodaysGames() {
   return games;
 }
 
+// ─── FETCH CLOSING LINE FOR A SPECIFIC GAME ──────────────────────────────────
+async function fetchGameOdds(sport, home, away) {
+  const key = SPORTS[sport];
+  if (!key) return null;
+
+  const apiUrl =
+    `https://api.the-odds-api.com/v4/sports/${key}/odds/` +
+    `?apiKey=${ODDS_KEY}&regions=us&markets=h2h` +
+    `&bookmakers=draftkings,fanduel&oddsFormat=american&dateFormat=iso`;
+
+  const { data } = await fetchJson(apiUrl);
+  if (!Array.isArray(data)) return null;
+
+  const game = data.find(g => g.home_team === home && g.away_team === away);
+  if (!game) return null;
+
+  const books = {};
+  for (const bm of game.bookmakers || []) {
+    const h2h = (bm.markets || []).find(m => m.key === "h2h");
+    if (!h2h) continue;
+    const ho = h2h.outcomes.find(o => o.name === game.home_team);
+    const ao = h2h.outcomes.find(o => o.name === game.away_team);
+    books[bm.key] = { home: ho?.price, away: ao?.price };
+  }
+  return { home: game.home_team, away: game.away_team, books };
+}
+
 // ─── GENERATE PICKS WITH CLAUDE ───────────────────────────────────────────────
 async function generatePicks(games) {
   const today = new Date().toLocaleDateString("en-US", {
@@ -215,6 +242,21 @@ app.get("/api/picks", async (req, res) => {
     res.json(picks);
   } catch (e) {
     console.error("[picks] Error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/closing-line", async (req, res) => {
+  if (!ODDS_KEY) return res.status(500).json({ error: "ODDS_API_KEY not set." });
+
+  const { sport, home, away } = req.query;
+  if (!sport || !home || !away) return res.status(400).json({ error: "Missing sport, home, or away." });
+
+  try {
+    const result = await fetchGameOdds(sport, home, away);
+    if (!result) return res.status(404).json({ error: "Game not found — it may not have posted odds yet, or has already finished." });
+    res.json(result);
+  } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
