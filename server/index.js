@@ -451,6 +451,13 @@ async function sendTelegram(text) {
 let latestPicks = loadCachedPicks(); // most recently generated picks, with commenceTime per bet
 const alertedBets = new Set();       // keys of bets we've already alerted on, "date|matchup|bet"
 
+// While today's picks haven't been generated yet, avoid re-hitting the Odds
+// API (6 requests, one per sport) on every page load/"try again" click —
+// retry at most once per cooldown window.
+const PICKS_RETRY_COOLDOWN_MS = 10 * 60 * 1000;
+let lastAttemptAt = 0;
+let lastAttemptError = null;
+
 // ─── AUTOMATIC CLOSING-LINE CAPTURE ───────────────────────────────────────────
 function extractClosingPrice(bet, result) {
   const bk = result.books?.[(bet.book || "").toLowerCase()];
@@ -513,18 +520,32 @@ app.get("/api/picks", async (req, res) => {
     return res.json(latestPicks);
   }
 
+  // Today's picks aren't ready yet. If we just tried and failed, don't retry
+  // (and re-spend Odds API quota) on every reload until the cooldown passes.
+  const sinceLastAttempt = Date.now() - lastAttemptAt;
+  if (req.query.refresh !== "true" && lastAttemptAt && sinceLastAttempt < PICKS_RETRY_COOLDOWN_MS) {
+    const retryMin = Math.ceil((PICKS_RETRY_COOLDOWN_MS - sinceLastAttempt) / 60000);
+    return res.status(503).json({ error: `${lastAttemptError} (next check in ~${retryMin} min)` });
+  }
+
+  lastAttemptAt = Date.now();
   try {
     console.log("[picks] Fetching live odds...");
     const games = await fetchTodaysGames();
     console.log(`[picks] ${games.length} games found`);
-    if (!games.length) return res.status(404).json({ error: "No games with full odds today. Lines may not be posted yet — try again later." });
+    if (!games.length) {
+      lastAttemptError = "No games with full odds today. Lines may not be posted yet — try again later.";
+      return res.status(404).json({ error: lastAttemptError });
+    }
     const picks = await generatePicks(games);
     console.log("[picks] ✓ Done");
     latestPicks = picks;
+    lastAttemptError = null;
     saveCachedPicks(picks);
     res.json(picks);
   } catch (e) {
     console.error("[picks] Error:", e.message);
+    lastAttemptError = e.message;
     res.status(500).json({ error: e.message });
   }
 });
@@ -534,6 +555,8 @@ app.get("/api/picks", async (req, res) => {
 app.post("/api/reset", (req, res) => {
   latestPicks = null;
   alertedBets.clear();
+  lastAttemptAt = 0;
+  lastAttemptError = null;
   try { fs.unlinkSync(PICKS_FILE); } catch {}
   res.json({ ok: true });
 });
