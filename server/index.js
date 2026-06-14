@@ -244,6 +244,12 @@ async function fetchGameOdds(sport, home, away, betType) {
   const game = data.find(g => g.home_team === home && g.away_team === away);
   if (!game) return null;
 
+  // Once a game has started, /odds can return live in-play prices instead
+  // of the closing line — e.g. a trailing team's ML ballooning to +880.
+  // That's not a meaningful comparison to a pregame bet, so treat it as
+  // unavailable rather than recording a misleading CLV.
+  if (new Date(game.commence_time).getTime() <= Date.now()) return null;
+
   const books = {};
   for (const bm of game.bookmakers || []) {
     const m = (bm.markets || []).find(mm => mm.key === marketKey);
@@ -493,7 +499,7 @@ app.get("/api/closing-line", async (req, res) => {
 
   try {
     const result = await fetchGameOdds(sport, home, away, betType);
-    if (!result) return res.status(404).json({ error: "Game not found — it may not have posted odds yet, or has already finished." });
+    if (!result) return res.status(404).json({ error: "Closing line not available — odds may not be posted yet, or the game has already started/finished." });
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });
