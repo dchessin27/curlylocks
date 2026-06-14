@@ -64,13 +64,11 @@ function fetchJson(reqUrl, opts = {}) {
 // ─── FETCH LIVE ODDS ──────────────────────────────────────────────────────────
 const SPORTS = {
   NBA:   "basketball_nba",
-  WNBA:  "basketball_wnba",
   MLB:   "baseball_mlb",
   NHL:   "icehockey_nhl",
   NFL:   "americanfootball_nfl",
   NCAAF: "americanfootball_ncaaf",
   NCAAB: "basketball_ncaab",
-  EPL:   "soccer_epl",
 };
 
 const SHARP_BOOKS = ["pinnacle", "circa_sports"];
