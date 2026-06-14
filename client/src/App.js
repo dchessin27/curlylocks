@@ -301,7 +301,7 @@ function RecordTab({ record, bankroll, unitPct, onSettle, onDelete, onSyncClosin
 }
 
 // ─── SETTINGS ─────────────────────────────────────────────────────────────────
-function SettingsPanel({ bankroll, unitPct, onSave }) {
+function SettingsPanel({ bankroll, unitPct, onSave, onResetAll }) {
   const [br, setBr]   = useState(String(bankroll));
   const [up, setUp]   = useState(String(unitPct));
   const [saved, setSaved] = useState(false);
@@ -363,6 +363,12 @@ function SettingsPanel({ bankroll, unitPct, onSave }) {
 
       <button onClick={handleSave} style={{ width:"100%", background:saved?"#22ff9922":"#c8a84b", color:saved?"#22ff99":"#07070f", border:`1px solid ${saved?"#22ff9955":"transparent"}`, borderRadius:8, padding:"14px 0", fontSize:12, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, letterSpacing:1, cursor:"pointer" }}>{saved ? "✓ SAVED" : "SAVE SETTINGS"}</button>
       <div style={{ fontSize:9, color:"#223", textAlign:"center", lineHeight:1.8 }}>Settings saved locally · Sharp sizing = 1-2% per bet<br/>Not financial advice · Bet responsibly</div>
+
+      <div style={{ background:"#1a0c0c", border:"1px solid #ff554433", borderRadius:10, padding:"16px 18px", marginTop:8 }}>
+        <div style={{ fontSize:9, color:"#ff5544", letterSpacing:1, marginBottom:10 }}>DANGER ZONE</div>
+        <button onClick={onResetAll} style={{ width:"100%", background:"transparent", color:"#ff5544", border:"1px solid #ff554455", borderRadius:8, padding:"12px 0", fontSize:11, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, letterSpacing:1, cursor:"pointer" }}>🗑 CLEAR TODAY'S PICKS &amp; HISTORY</button>
+        <div style={{ fontSize:9, color:"#445566", marginTop:8 }}>Wipes today's locked picks and your tracked record, then generates a fresh set of 3 picks on next load.</div>
+      </div>
     </div>
   );
 }
@@ -420,6 +426,14 @@ export default function App() {
     }));
     setStatus("stopping");
     setTimeout(() => setStatus("done"), 2000);
+  }
+
+  async function resetAll() {
+    if (!window.confirm("Clear today's locked picks and your tracked history? The next load will generate a fresh set of picks for today. This can't be undone.")) return;
+    setRecord([]); saveRecord([]);
+    try { await fetch("/api/reset", { method: "POST" }); } catch {}
+    setData(null);
+    load();
   }
 
   function settle(id, result)  { const u = record.map(p => p.id===id ? {...p,result} : p); setRecord(u); saveRecord(u); }
@@ -617,7 +631,7 @@ export default function App() {
         })}
 
         {status==="done" && tab==="record"   && <RecordTab record={record} bankroll={bankroll} unitPct={unitPct} onSettle={settle} onDelete={deletePick} onSyncClosingLines={syncClosingLines} syncingCLV={syncingCLV} />}
-        {                   tab==="settings" && <SettingsPanel bankroll={bankroll} unitPct={unitPct} onSave={saveSettingsHandler} />}
+        {                   tab==="settings" && <SettingsPanel bankroll={bankroll} unitPct={unitPct} onSave={saveSettingsHandler} onResetAll={resetAll} />}
 
         {status==="done" && <div style={{ textAlign:"center", fontSize:9, color:"#1a1a2e", lineHeight:1.9, marginTop:4 }}>
           Curly Locks · Real odds via The Odds API · EV vs Pinnacle no-vig · Claude AI<br/>Not financial advice · Bet responsibly

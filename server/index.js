@@ -112,6 +112,13 @@ async function fetchTodaysGames() {
       for (const game of data) {
         if (game.commence_time.slice(0, 10) !== today) continue;
 
+        // Once a game starts, /odds can return live in-play prices instead of
+        // pregame lines — a team trailing big can show a wildly inflated ML
+        // (e.g. +1400) that looks like a massive "mispricing" vs. a sharp
+        // book's live line but is really just live variance, not a pregame
+        // edge. Skip started games so picks are only built from pregame odds.
+        if (new Date(game.commence_time).getTime() <= Date.now()) continue;
+
         const h2h = {}, spreads = {}, totals = {};
         for (const bm of game.bookmakers || []) {
           for (const m of bm.markets || []) {
@@ -517,6 +524,15 @@ app.get("/api/picks", async (req, res) => {
     console.error("[picks] Error:", e.message);
     res.status(500).json({ error: e.message });
   }
+});
+
+// Wipe today's locked picks (cache + disk) so the next /api/picks call
+// generates a fresh set. Used by the "reset" button in Settings.
+app.post("/api/reset", (req, res) => {
+  latestPicks = null;
+  alertedBets.clear();
+  try { fs.unlinkSync(PICKS_FILE); } catch {}
+  res.json({ ok: true });
 });
 
 app.get("/api/closing-line", async (req, res) => {
