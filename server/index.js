@@ -504,43 +504,6 @@ app.get("/health", (req, res) => {
   });
 });
 
-// TEMP — diagnose why fetchTodaysGames() is returning zero games.
-// Remove once the "No games with full odds today" issue is resolved.
-app.get("/api/debug-games", async (req, res) => {
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-  const now = Date.now();
-  const out = { today, todayLabel: todayLabel(), nowISO: new Date().toISOString(), sports: {} };
-
-  for (const [sport, key] of Object.entries(SPORTS)) {
-    try {
-      const apiUrl =
-        `https://api.the-odds-api.com/v4/sports/${key}/odds/` +
-        `?apiKey=${ODDS_KEY}&regions=us&markets=h2h,spreads,totals` +
-        `&bookmakers=pinnacle,circa_sports,draftkings,fanduel,betmgm` +
-        `&oddsFormat=american&dateFormat=iso`;
-      const { data } = await fetchJson(apiUrl);
-      if (!Array.isArray(data)) { out.sports[sport] = { error: "non-array response", data }; continue; }
-
-      const todays = data.filter(g => g.commence_time.slice(0, 10) === today);
-      const upcoming = todays.filter(g => new Date(g.commence_time).getTime() > now);
-      out.sports[sport] = {
-        total: data.length,
-        today: todays.length,
-        upcoming: upcoming.length,
-        sample: upcoming.slice(0, 3).map(g => ({
-          matchup: `${g.away_team} @ ${g.home_team}`,
-          commence_time: g.commence_time,
-          bookmakers: (g.bookmakers || []).map(b => b.key),
-        })),
-      };
-    } catch (e) {
-      out.sports[sport] = { error: e.message };
-    }
-  }
-
-  res.json(out);
-});
-
 app.get("/api/picks", async (req, res) => {
   if (!ODDS_KEY)   return res.status(500).json({ error: "ODDS_API_KEY not set. Add it to .env or Railway environment variables." });
   if (!CLAUDE_KEY) return res.status(500).json({ error: "CLAUDE_API_KEY not set. Add it to .env or Railway environment variables." });
