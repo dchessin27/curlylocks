@@ -17,6 +17,12 @@ const pickPL = p => p.result === "win" ? (oddsToDecimal(p.odds) - 1) * 100 : p.r
 const unitsToDollars = (u, b, p = 1) => (u * p / 100) * b;
 const fmtDollars = a => { const abs = Math.abs(a), sign = a >= 0 ? "+" : "-"; return abs >= 1000 ? `${sign}$${(abs/1000).toFixed(1)}k` : `${sign}$${abs.toFixed(0)}`; };
 
+function betToEntry(bet, date) {
+  // matchup format from Claude is "Away @ Home"
+  const [away, home] = (bet.matchup || "").split("@").map(s => s.trim());
+  return { id: Date.now()+Math.random(), date, bet:bet.bet, sport:bet.sport, signal:bet.signal, book:bet.book, odds:parseOdds(bet.odds), ev:bet.ev, confidence:bet.confidence, matchup:bet.matchup, home, away, betType:bet.betType || "ml", side:bet.side || null, line:bet.line ?? null, result:"pending", closingLine:null };
+}
+
 function calcStats(picks) {
   if (!picks.length) return null;
   const s = picks.filter(p => p.result !== "pending");
@@ -132,7 +138,7 @@ function RecordTab({ record, bankroll, unitPct, onSettle, onDelete, onSyncClosin
       {view === "overview" && (
         <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
           {!overall || overall.total === 0
-            ? <div style={{ textAlign:"center", padding:"50px 0", color:"#334455", fontSize:10 }}>No picks logged yet.<br/>Go to BETS and hit + LOG.</div>
+            ? <div style={{ textAlign:"center", padding:"50px 0", color:"#334455", fontSize:10 }}>No picks tracked yet.<br/>Check the BETS tab — today's locks are tracked automatically.</div>
             : <>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
                 <div style={{ background:"#0c0c18", border:"1px solid #1a1a2e", borderRadius:8, padding:"14px 16px" }}>
@@ -375,6 +381,18 @@ export default function App() {
 
   useEffect(() => { load(); autoSettleRecord(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Automatically track every pick the moment it's loaded — no manual "log" needed.
+  useEffect(() => {
+    if (!data?.bets?.length) return;
+    setRecord(prev => {
+      const fresh = data.bets.filter(bet => !prev.some(p => p.bet===bet.bet && p.date===data.date));
+      if (!fresh.length) return prev;
+      const updated = [...fresh.map(bet => betToEntry(bet, data.date)), ...prev];
+      saveRecord(updated);
+      return updated;
+    });
+  }, [data]);
+
   async function load() {
     setStatus("loading"); setError(null);
     try {
@@ -394,17 +412,8 @@ export default function App() {
     setTimeout(() => setStatus("done"), 2000);
   }
 
-  function addToRecord(bet, date) {
-    // matchup format from Claude is "Away @ Home"
-    const [away, home] = (bet.matchup || "").split("@").map(s => s.trim());
-    const entry = { id: Date.now()+Math.random(), date, bet:bet.bet, sport:bet.sport, signal:bet.signal, book:bet.book, odds:parseOdds(bet.odds), ev:bet.ev, confidence:bet.confidence, matchup:bet.matchup, home, away, betType:bet.betType || "ml", side:bet.side || null, line:bet.line ?? null, result:"pending", closingLine:null };
-    const u = [entry, ...record]; setRecord(u); saveRecord(u);
-  }
   function settle(id, result)  { const u = record.map(p => p.id===id ? {...p,result} : p); setRecord(u); saveRecord(u); }
   function deletePick(id)      { const u = record.filter(p => p.id!==id); setRecord(u); saveRecord(u); }
-  function removeFromRecord(bet, date) {
-    const u = record.filter(p => !(p.bet===bet.bet && p.date===date)); setRecord(u); saveRecord(u);
-  }
 
   function gradeBet(p, game) {
     const betType = p.betType || "ml";
@@ -568,7 +577,6 @@ export default function App() {
         {status==="done" && tab==="bets" && data?.bets?.map((bet, i) => {
           const rm = RM[i]||RM[2], sc = SC[bet.sport]||"#c8a84b", sgc = SGC[bet.signal]||"#c8a84b";
           const conf = bet.confidence||80;
-          const logged = record.some(p => p.bet===bet.bet && p.date===data.date);
           return (
             <div key={i} style={{ background:"#0c0c18", border:`1px solid ${rm.border}`, borderRadius:12, padding:"18px 18px 16px", animation:`fadeUp 0.3s ease ${i*0.1}s both`, boxShadow:`0 0 24px ${rm.glow}` }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12 }}>
@@ -581,7 +589,7 @@ export default function App() {
                 </div>
                 <div style={{ display:"flex", gap:6, alignItems:"center" }}>
                   <span style={{ background:sgc+"20", color:sgc, border:`1px solid ${sgc}44`, borderRadius:4, padding:"2px 7px", fontSize:9, fontWeight:700, letterSpacing:1 }}>{bet.signal}</span>
-                  <button onClick={() => logged ? removeFromRecord(bet, data.date) : addToRecord(bet, data.date)} style={{ background:logged?"#22ff9914":"#c8a84b14", border:`1px solid ${logged?"#22ff9944":"#c8a84b44"}`, color:logged?"#22ff99":"#c8a84b", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:9, fontFamily:"'DM Mono',monospace" }}>{logged?"✓ logged":"+ log"}</button>
+                  <span style={{ background:"#22ff9914", border:"1px solid #22ff9944", color:"#22ff99", borderRadius:4, padding:"2px 8px", fontSize:9, fontFamily:"'DM Mono',monospace" }}>✓ tracked</span>
                 </div>
               </div>
               <div style={{ background:rm.border+"10", border:`1px solid ${rm.border}33`, borderRadius:8, padding:"11px 13px", marginBottom:12 }}>
