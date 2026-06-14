@@ -86,6 +86,16 @@ function blendedTrueProbs(decA, decB) {
   return [pa / t, pb / t];
 }
 
+// True if every individual sharp book's own no-vig probability agrees in
+// direction (positive vs. negative EV) with the blended consensus — i.e.
+// this edge isn't just one stale/outlier sharp line dragging the average.
+// Returns null when there's only one sharp book to check against.
+function sharpAgreement(perBookProbs, sideIdx, price, blendedEv) {
+  if (perBookProbs.length < 2) return null;
+  const blendedPositive = blendedEv > 0;
+  return perBookProbs.every(p => (calcEV(p[sideIdx], toDecimal(price)) > 0) === blendedPositive);
+}
+
 async function fetchTodaysGames() {
   const today = new Date().toISOString().slice(0, 10);
   const games = [];
@@ -135,11 +145,12 @@ async function fetchTodaysGames() {
         // ── Moneyline ──
         let sharps = sharpsFor(h2h);
         if (sharps.length && (h2h.draftkings || h2h.fanduel)) {
+          const perBook = sharps.map(b => noVigProbs(toDecimal(h2h[b].home), toDecimal(h2h[b].away)));
           const [tH, tA] = blendedTrueProbs(
             sharps.map(b => toDecimal(h2h[b].home)),
             sharps.map(b => toDecimal(h2h[b].away)),
           );
-          for (const [side, trueProb] of [["home", tH], ["away", tA]]) {
+          for (const [side, trueProb, idx] of [["home", tH, 0], ["away", tA, 1]]) {
             let best = null;
             for (const book of SOFT_BOOKS) {
               const o = h2h[book]?.[side];
@@ -147,18 +158,19 @@ async function fetchTodaysGames() {
               const ev = calcEV(trueProb, toDecimal(o));
               if (!best || ev > best.ev) best = { book, price: o, point: null, ev };
             }
-            if (best) edges.push({ market: "ml", side, sharpSource: sharps.join("+"), ...best });
+            if (best) edges.push({ market: "ml", side, sharpSource: sharps.join("+"), consensus: sharpAgreement(perBook, idx, best.price, best.ev), ...best });
           }
         }
 
         // ── Spread ──
         sharps = sharpsFor(spreads);
         if (sharps.length && (spreads.draftkings || spreads.fanduel)) {
+          const perBook = sharps.map(b => noVigProbs(toDecimal(spreads[b].home.price), toDecimal(spreads[b].away.price)));
           const [tH, tA] = blendedTrueProbs(
             sharps.map(b => toDecimal(spreads[b].home.price)),
             sharps.map(b => toDecimal(spreads[b].away.price)),
           );
-          for (const [side, trueProb] of [["home", tH], ["away", tA]]) {
+          for (const [side, trueProb, idx] of [["home", tH, 0], ["away", tA, 1]]) {
             let best = null;
             for (const book of SOFT_BOOKS) {
               const o = spreads[book]?.[side];
@@ -166,18 +178,19 @@ async function fetchTodaysGames() {
               const ev = calcEV(trueProb, toDecimal(o.price));
               if (!best || ev > best.ev) best = { book, price: o.price, point: o.point, ev };
             }
-            if (best) edges.push({ market: "spread", side, sharpSource: sharps.join("+"), ...best });
+            if (best) edges.push({ market: "spread", side, sharpSource: sharps.join("+"), consensus: sharpAgreement(perBook, idx, best.price, best.ev), ...best });
           }
         }
 
         // ── Total ──
         sharps = sharpsFor(totals);
         if (sharps.length && (totals.draftkings || totals.fanduel)) {
+          const perBook = sharps.map(b => noVigProbs(toDecimal(totals[b].over.price), toDecimal(totals[b].under.price)));
           const [tO, tU] = blendedTrueProbs(
             sharps.map(b => toDecimal(totals[b].over.price)),
             sharps.map(b => toDecimal(totals[b].under.price)),
           );
-          for (const [side, trueProb] of [["over", tO], ["under", tU]]) {
+          for (const [side, trueProb, idx] of [["over", tO, 0], ["under", tU, 1]]) {
             let best = null;
             for (const book of SOFT_BOOKS) {
               const o = totals[book]?.[side];
@@ -185,11 +198,20 @@ async function fetchTodaysGames() {
               const ev = calcEV(trueProb, toDecimal(o.price));
               if (!best || ev > best.ev) best = { book, price: o.price, point: o.point, ev };
             }
-            if (best) edges.push({ market: "total", side, sharpSource: sharps.join("+"), ...best });
+            if (best) edges.push({ market: "total", side, sharpSource: sharps.join("+"), consensus: sharpAgreement(perBook, idx, best.price, best.ev), ...best });
           }
         }
 
         if (!edges.length) continue;
+
+        // Confluence: moneyline AND spread both show a real edge on the
+        // same team — two independent markets agreeing the soft book is
+        // underpricing them, which is a stronger signal than either alone.
+        const mlEdge     = edges.find(e => e.market === "ml"     && e.ev > 0);
+        const spreadEdge = edges.find(e => e.market === "spread" && e.ev > 0);
+        if (mlEdge && spreadEdge && mlEdge.side === spreadEdge.side) {
+          mlEdge.confluence = spreadEdge.confluence = true;
+        }
 
         games.push({
           sport,
@@ -320,7 +342,14 @@ async function generatePicks(games) {
   const gameLines = games.slice(0, 20).map(g => {
     const t = new Date(g.time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
     const edgeLines = g.edges
-      .map(e => `${betLabel(g, e)} ${e.price > 0 ? "+" : ""}${e.price} (${e.book}, EV ${e.ev >= 0 ? "+" : ""}${e.ev.toFixed(1)}%, vs ${e.sharpSource})`)
+      .map(e => {
+        const tags = [];
+        if (e.consensus === true)  tags.push("CONSENSUS");
+        if (e.consensus === false) tags.push("SPLIT");
+        if (e.confluence)          tags.push("CONFLUENCE");
+        const tagStr = tags.length ? `, ${tags.join("+")}` : "";
+        return `${betLabel(g, e)} ${e.price > 0 ? "+" : ""}${e.price} (${e.book}, EV ${e.ev >= 0 ? "+" : ""}${e.ev.toFixed(1)}%, vs ${e.sharpSource}${tagStr})`;
+      })
       .join(" | ");
     return `${g.sport}: ${g.away} @ ${g.home} (${t}) — ${edgeLines}`;
   }).join("\n");
@@ -337,8 +366,12 @@ async function generatePicks(games) {
     `If genuinely nothing clears the bar, return an empty "bets" array.\n` +
     `These picks are locked in for the entire day and tracked for real money, so be selective and consistent — ` +
     `use ONLY the exact odds, points, and EV numbers from the data above.\n` +
-    `Prioritise: highest positive EV, playoff/high-stakes spots, RLM signals.\n` +
-    `Signal: EV (price value), STEAM (sharp syndicate action), RLM (reverse line movement), ARB (both sides +EV).\n\n` +
+    `Some edges carry tags computed directly from the data, in parentheses after the EV: ` +
+    `CONSENSUS means Pinnacle and Circa INDEPENDENTLY both price this side as +EV (not just on average) — weight these higher. ` +
+    `SPLIT means the two sharp books disagree on direction — treat this EV with caution even if it looks positive. ` +
+    `CONFLUENCE means the moneyline AND spread both favor the same team — two independent markets agreeing the soft book is underpricing them, a strong signal.\n` +
+    `Prioritise: highest positive EV, CONSENSUS and CONFLUENCE tags, playoff/high-stakes spots, RLM signals. Be skeptical of SPLIT edges.\n` +
+    `Signal: EV (price value), STEAM (sharp syndicate action), RLM (reverse line movement), ARB (both sides +EV), CONSENSUS (sharp books independently agree), CONFLUENCE (moneyline+spread agree).\n\n` +
     `For each bet set "betType" to "ml", "spread", or "total". Set "side" to "home"/"away" for ml and spread bets, or "over"/"under" for total bets. ` +
     `Set "line" to the spread/total number shown above (e.g. -4.5, 218.5), or null for ml. ` +
     `Set "bet" to a short human label matching the format above, e.g. "Lakers +4.5", "Over 218.5", "Celtics ML".\n\n` +
