@@ -156,7 +156,7 @@ async function fetchTodaysGames() {
               const ev = calcEV(trueProb, toDecimal(o));
               if (!best || ev > best.ev) best = { book, price: o, point: null, ev };
             }
-            if (best) edges.push({ market: "ml", side, sharpSource: sharps.join("+"), consensus: sharpAgreement(perBook, idx, best.price, best.ev), ...best });
+            if (best) edges.push({ market: "ml", side, sharpSource: sharps.join("+"), consensus: sharpAgreement(perBook, idx, best.price, best.ev), trueProb, ...best });
           }
         }
 
@@ -176,7 +176,7 @@ async function fetchTodaysGames() {
               const ev = calcEV(trueProb, toDecimal(o.price));
               if (!best || ev > best.ev) best = { book, price: o.price, point: o.point, ev };
             }
-            if (best) edges.push({ market: "spread", side, sharpSource: sharps.join("+"), consensus: sharpAgreement(perBook, idx, best.price, best.ev), ...best });
+            if (best) edges.push({ market: "spread", side, sharpSource: sharps.join("+"), consensus: sharpAgreement(perBook, idx, best.price, best.ev), trueProb, ...best });
           }
         }
 
@@ -196,7 +196,7 @@ async function fetchTodaysGames() {
               const ev = calcEV(trueProb, toDecimal(o.price));
               if (!best || ev > best.ev) best = { book, price: o.price, point: o.point, ev };
             }
-            if (best) edges.push({ market: "total", side, sharpSource: sharps.join("+"), consensus: sharpAgreement(perBook, idx, best.price, best.ev), ...best });
+            if (best) edges.push({ market: "total", side, sharpSource: sharps.join("+"), consensus: sharpAgreement(perBook, idx, best.price, best.ev), trueProb, ...best });
           }
         }
 
@@ -346,7 +346,7 @@ async function generatePicks(games) {
         if (e.consensus === false) tags.push("SPLIT");
         if (e.confluence)          tags.push("CONFLUENCE");
         const tagStr = tags.length ? `, ${tags.join("+")}` : "";
-        return `${betLabel(g, e)} ${e.price > 0 ? "+" : ""}${e.price} (${e.book}, EV ${e.ev >= 0 ? "+" : ""}${e.ev.toFixed(1)}%, vs ${e.sharpSource}${tagStr})`;
+        return `${betLabel(g, e)} ${e.price > 0 ? "+" : ""}${e.price} (${e.book}, true ${(e.trueProb * 100).toFixed(0)}%, EV ${e.ev >= 0 ? "+" : ""}${e.ev.toFixed(1)}%, vs ${e.sharpSource}${tagStr})`;
       })
       .join(" | ");
     return `${g.sport}: ${g.away} @ ${g.home} (${t}) — ${edgeLines}`;
@@ -368,7 +368,12 @@ async function generatePicks(games) {
     `CONSENSUS means Pinnacle and Circa INDEPENDENTLY both price this side as +EV (not just on average) — weight these higher. ` +
     `SPLIT means the two sharp books disagree on direction — treat this EV with caution even if it looks positive. ` +
     `CONFLUENCE means the moneyline AND spread both favor the same team — two independent markets agreeing the soft book is underpricing them, a strong signal.\n` +
-    `Prioritise: highest positive EV, CONSENSUS and CONFLUENCE tags, playoff/high-stakes spots, RLM signals. Be skeptical of SPLIT edges.\n` +
+    `Each edge also shows "true X%" — the blended sharp probability that side actually wins/covers/hits. ` +
+    `American odds are convex, so the SAME probability misestimate produces a much bigger EV% on a plus-money longshot than on a favorite — raw EV% alone is biased toward longshots. ` +
+    `Your job is not just to find +EV, it's to pick winners: prefer sides with true probability of roughly 45% or higher when they clear the EV bar. ` +
+    `Only take a longshot (true probability well under 40%) if its EV is clearly exceptional (+5%+) and ideally tagged CONSENSUS or CONFLUENCE — don't fill the card with plus-money underdogs just because their EV% looks biggest. ` +
+    `A card of modest favorites/near-coinflips that are genuinely +EV and likely to hit beats a card of technically-profitable longshots that lose most of the time.\n` +
+    `Prioritise: a balance of positive EV and true win probability, CONSENSUS and CONFLUENCE tags, playoff/high-stakes spots, RLM signals. Be skeptical of SPLIT edges and of longshots with true probability well under 40%.\n` +
     `Signal: EV (price value), STEAM (sharp syndicate action), RLM (reverse line movement), ARB (both sides +EV), CONSENSUS (sharp books independently agree), CONFLUENCE (moneyline+spread agree).\n\n` +
     `For each bet set "betType" to "ml", "spread", or "total". Set "side" to "home"/"away" for ml and spread bets, or "over"/"under" for total bets. ` +
     `Set "line" to the spread/total number shown above (e.g. -4.5, 218.5), or null for ml. ` +
