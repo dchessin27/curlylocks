@@ -65,9 +65,13 @@ function fetchJson(reqUrl, opts = {}) {
 // Each sport here costs one Odds API request per picks attempt (free tier =
 // 500/month). Off-season leagues are commented out — re-add them when their
 // seasons start (NBA ~October, NFL/NCAAF ~August, NCAAB ~November).
+// WORLDCUP covers the 2026 FIFA World Cup — remove it once the tournament
+// ends (~July 19). MMA (UFC etc.) runs year-round.
 const SPORTS = {
-  MLB:   "baseball_mlb",
-  NHL:   "icehockey_nhl",
+  MLB:      "baseball_mlb",
+  NHL:      "icehockey_nhl",
+  MMA:      "mma_mixed_martial_arts",
+  WORLDCUP: "soccer_fifa_world_cup",
   // NBA:   "basketball_nba",
 };
 
@@ -126,6 +130,10 @@ async function fetchTodaysGames() {
         for (const bm of game.bookmakers || []) {
           for (const m of bm.markets || []) {
             if (m.key === "h2h") {
+              // Skip 3-way moneylines (soccer's home/draw/away) — the no-vig
+              // math below assumes a binary market, and folding in a draw
+              // would inflate both true-probability numbers.
+              if (m.outcomes.length !== 2) continue;
               const ho = m.outcomes.find(o => o.name === game.home_team);
               const ao = m.outcomes.find(o => o.name === game.away_team);
               if (ho && ao) h2h[bm.key] = { home: ho.price, away: ao.price };
