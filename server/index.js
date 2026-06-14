@@ -158,11 +158,16 @@ async function fetchGameOdds(sport, home, away) {
   return { home: game.home_team, away: game.away_team, books };
 }
 
-// ─── GENERATE PICKS WITH CLAUDE ───────────────────────────────────────────────
-async function generatePicks(games) {
-  const today = new Date().toLocaleDateString("en-US", {
+// ─── DATE HELPER ──────────────────────────────────────────────────────────────
+function todayLabel() {
+  return new Date().toLocaleDateString("en-US", {
     weekday: "long", month: "long", day: "numeric", year: "numeric",
   });
+}
+
+// ─── GENERATE PICKS WITH CLAUDE ───────────────────────────────────────────────
+async function generatePicks(games) {
+  const today = todayLabel();
 
   if (!games.length) throw new Error("No games with valid odds found for today");
 
@@ -188,10 +193,14 @@ async function generatePicks(games) {
     `You are the sharpest sports bettor alive. Today is ${today}.\n\n` +
     `Here are today's real games with exact EV vs ${games[0]?.sharpSource || "Pinnacle"} no-vig:\n\n` +
     `${gameLines}\n\n` +
-    `Pick the 3 best bets. Use ONLY the exact odds and EV numbers from the data above.\n` +
+    `Pick ONLY bets that represent a real, sharp edge — positive EV vs the no-vig sharp line above, ideally +2% EV or better.\n` +
+    `Return AT MOST 3 bets, ranked best first. If only 1 or 2 games today clear that bar, return only those — ` +
+    `do NOT pad the list with mediocre or break-even bets just to reach 3. If genuinely nothing clears the bar, return an empty "bets" array.\n` +
+    `These picks are locked in for the entire day and tracked for real money, so be selective and consistent — ` +
+    `use ONLY the exact odds and EV numbers from the data above.\n` +
     `Prioritise: highest positive EV, playoff/high-stakes spots, RLM signals.\n` +
     `Signal: EV (price value), STEAM (sharp syndicate action), RLM (reverse line movement), ARB (both sides +EV).\n\n` +
-    `Return ONLY valid JSON, no markdown:\n` +
+    `Return ONLY valid JSON, no markdown, no comments. The "bets" array should contain only as many entries (0-3) as genuinely clear the bar — example shows the shape for 3, trim it down if fewer qualify:\n` +
     `{"date":"${today}","bets":[` +
     `{"rank":1,"sport":"MLB","matchup":"Team A @ Team B","bet":"Team A ML","book":"DraftKings","odds":"+115","ev":"+4.2%","confidence":82,"reasoning":"2 sentence sharp reasoning using the real numbers above.","signal":"EV"},` +
     `{"rank":2,"sport":"NBA","matchup":"Team C @ Team D","bet":"Team C ML","book":"FanDuel","odds":"-108","ev":"+2.9%","confidence":77,"reasoning":"Sharp reasoning.","signal":"RLM"},` +
@@ -203,6 +212,7 @@ async function generatePicks(games) {
     body: JSON.stringify({
       model: "claude-sonnet-4-5",
       max_tokens: 1000,
+      temperature: 0,
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -216,7 +226,7 @@ async function generatePicks(games) {
   if (s === -1 || e === -1) throw new Error("No JSON in response: " + raw.slice(0, 100));
 
   const parsed = JSON.parse(raw.slice(s, e + 1));
-  if (!parsed.bets?.length) throw new Error("No bets in response");
+  if (!Array.isArray(parsed.bets)) throw new Error("No bets array in response");
 
   // Attach each game's real start time so we can schedule pre-game alerts
   for (const bet of parsed.bets) {
@@ -275,6 +285,11 @@ app.get("/health", (req, res) => {
 app.get("/api/picks", async (req, res) => {
   if (!ODDS_KEY)   return res.status(500).json({ error: "ODDS_API_KEY not set. Add it to .env or Railway environment variables." });
   if (!CLAUDE_KEY) return res.status(500).json({ error: "CLAUDE_API_KEY not set. Add it to .env or Railway environment variables." });
+
+  // Picks are locked in once per day — reloading should not produce new/different bets.
+  if (req.query.refresh !== "true" && latestPicks?.date === todayLabel()) {
+    return res.json(latestPicks);
+  }
 
   try {
     console.log("[picks] Fetching live odds...");

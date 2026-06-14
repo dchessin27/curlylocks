@@ -380,7 +380,7 @@ export default function App() {
       const res  = await fetch("/api/picks");
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || "Server error " + res.status);
-      if (!body.bets?.length) throw new Error("No picks returned");
+      if (!Array.isArray(body.bets)) throw new Error("No picks returned");
       setData(body);
     } catch(e) {
       setError(e.message);
@@ -498,6 +498,11 @@ export default function App() {
           <div style={{ fontSize:12, color:"#ff8866", marginBottom:8 }}>Could not load picks</div>
           <div style={{ fontSize:10, color:"#cc5533", marginBottom:12, wordBreak:"break-word" }}>{error}</div>
           <button onClick={load} style={{ background:"#c8a84b", color:"#07070f", border:"none", borderRadius:6, padding:"8px 20px", fontSize:11, fontWeight:700, letterSpacing:1, cursor:"pointer", fontFamily:"'DM Mono',monospace" }}>⟳ TRY AGAIN</button>
+        </div>}
+
+        {!error && status==="done" && tab==="bets" && data?.bets?.length===0 && <div style={{ background:"#0c0c18", border:"1px solid #1a1a2e", borderRadius:8, padding:24, textAlign:"center" }}>
+          <div style={{ fontSize:12, color:"#778899", marginBottom:6 }}>No locks today</div>
+          <div style={{ fontSize:10, color:"#445566" }}>Nothing on the board cleared the bar for a sharp edge. Check back tomorrow.</div>
         </div>}
 
         {status==="done" && tab==="bets" && data?.bets?.map((bet, i) => {
