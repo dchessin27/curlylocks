@@ -436,6 +436,28 @@ async function sendTelegram(text) {
 let latestPicks = loadCachedPicks(); // most recently generated picks, with commenceTime per bet
 const alertedBets = new Set();       // keys of bets we've already alerted on, "date|matchup|bet"
 
+// ─── AUTOMATIC CLOSING-LINE CAPTURE ───────────────────────────────────────────
+function extractClosingPrice(bet, result) {
+  const bk = result.books?.[(bet.book || "").toLowerCase()];
+  if (!bk) return null;
+  if (bet.betType === "total") return bet.side === "under" ? bk.under : bk.over;
+  return bet.side === "home" ? bk.home : bk.away;
+}
+
+async function captureClosingLine(bet) {
+  try {
+    const [away, home] = (bet.matchup || "").split("@").map(s => s.trim());
+    const result = await fetchGameOdds(bet.sport, home, away, bet.betType || "ml");
+    if (!result) return;
+    const price = extractClosingPrice(bet, result);
+    if (price === undefined || price === null) return;
+    bet.closingLine = price;
+    saveCachedPicks(latestPicks);
+  } catch (e) {
+    console.warn("[clv] capture failed:", e.message);
+  }
+}
+
 setInterval(() => {
   if (!latestPicks?.bets?.length) return;
   const now = Date.now();
@@ -447,10 +469,11 @@ setInterval(() => {
     const msUntil = new Date(bet.commenceTime).getTime() - now;
     if (msUntil <= 10 * 60 * 1000 && msUntil > 9 * 60 * 1000) {
       alertedBets.add(key);
+      captureClosingLine(bet);
       sendTelegram(
         `⏰ *${bet.matchup}* starts in ~10 min\n` +
         `🔒 ${bet.bet} @ ${bet.book} ${bet.odds} (${bet.signal}, ${bet.ev} EV)\n` +
-        `Sync closing lines on Curly Locks now for accurate CLV.`
+        `Closing line captured automatically for CLV tracking.`
       );
     }
   }

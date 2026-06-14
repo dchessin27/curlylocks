@@ -20,7 +20,7 @@ const fmtDollars = a => { const abs = Math.abs(a), sign = a >= 0 ? "+" : "-"; re
 function betToEntry(bet, date) {
   // matchup format from Claude is "Away @ Home"
   const [away, home] = (bet.matchup || "").split("@").map(s => s.trim());
-  return { id: Date.now()+Math.random(), date, bet:bet.bet, sport:bet.sport, signal:bet.signal, book:bet.book, odds:parseOdds(bet.odds), ev:bet.ev, confidence:bet.confidence, matchup:bet.matchup, home, away, betType:bet.betType || "ml", side:bet.side || null, line:bet.line ?? null, result:"pending", closingLine:null };
+  return { id: Date.now()+Math.random(), date, bet:bet.bet, sport:bet.sport, signal:bet.signal, book:bet.book, odds:parseOdds(bet.odds), ev:bet.ev, confidence:bet.confidence, matchup:bet.matchup, home, away, betType:bet.betType || "ml", side:bet.side || null, line:bet.line ?? null, result:"pending", closingLine:bet.closingLine ?? null };
 }
 
 function calcStats(picks) {
@@ -382,12 +382,22 @@ export default function App() {
   useEffect(() => { load(); autoSettleRecord(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Automatically track every pick the moment it's loaded — no manual "log" needed.
+  // Also backfill closingLine onto already-tracked picks once the server has
+  // captured it (auto-captured ~10 min before kickoff).
   useEffect(() => {
     if (!data?.bets?.length) return;
     setRecord(prev => {
-      const fresh = data.bets.filter(bet => !prev.some(p => p.bet===bet.bet && p.date===data.date));
-      if (!fresh.length) return prev;
-      const updated = [...fresh.map(bet => betToEntry(bet, data.date)), ...prev];
+      let changed = false;
+      const withCLV = prev.map(p => {
+        if (p.date !== data.date || p.closingLine != null) return p;
+        const bet = data.bets.find(b => b.bet === p.bet);
+        if (!bet || bet.closingLine == null) return p;
+        changed = true;
+        return { ...p, closingLine: bet.closingLine };
+      });
+      const fresh = data.bets.filter(bet => !withCLV.some(p => p.bet===bet.bet && p.date===data.date));
+      if (!fresh.length && !changed) return prev;
+      const updated = fresh.length ? [...fresh.map(bet => betToEntry(bet, data.date)), ...withCLV] : withCLV;
       saveRecord(updated);
       return updated;
     });
