@@ -316,9 +316,14 @@ function saveCachedPicks(picks) {
 }
 
 // ─── DATE HELPER ──────────────────────────────────────────────────────────────
+// US sports books treat the "game day" as the Eastern-time calendar day. Pin
+// the picks-lock boundary to that timezone regardless of where the server
+// runs (Railway defaults to UTC, which would roll over to "tomorrow" at
+// 8pm ET and trigger an early regeneration mid-evening for US users).
 function todayLabel() {
   return new Date().toLocaleDateString("en-US", {
     weekday: "long", month: "long", day: "numeric", year: "numeric",
+    timeZone: "America/New_York",
   });
 }
 
