@@ -5,3 +5,4 @@ client/build/
 .DS_Store
 mnt/
 server/data/
+.commit_msg.txt
