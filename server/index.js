@@ -95,7 +95,10 @@ function sharpAgreement(perBookProbs, sideIdx, price, blendedEv) {
 }
 
 async function fetchTodaysGames() {
-  const today = new Date().toISOString().slice(0, 10);
+  // Compare against the ET "betting day" (matches todayLabel()), not the UTC
+  // date — otherwise evening US games (8pm ET+ = already the next UTC day)
+  // get excluded from "today's" pool entirely.
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
   const games = [];
 
   for (const [sport, key] of Object.entries(SPORTS)) {
