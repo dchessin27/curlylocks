@@ -28,11 +28,6 @@ app.use(express.static(clientBuild));
 function toDecimal(american) {
   return american > 0 ? american / 100 + 1 : 100 / Math.abs(american) + 1;
 }
-function toAmerican(decimal) {
-  return decimal >= 2
-    ? Math.round((decimal - 1) * 100)
-    : Math.round(-100 / (decimal - 1));
-}
 function noVigProbs(d1, d2) {
   const p1 = 1 / d1, p2 = 1 / d2, t = p1 + p2;
   return [p1 / t, p2 / t];
@@ -68,11 +63,28 @@ function fetchJson(reqUrl, opts = {}) {
 
 // ─── FETCH LIVE ODDS ──────────────────────────────────────────────────────────
 const SPORTS = {
-  NBA: "basketball_nba",
-  MLB: "baseball_mlb",
-  NHL: "icehockey_nhl",
-  NFL: "americanfootball_nfl",
+  NBA:   "basketball_nba",
+  WNBA:  "basketball_wnba",
+  MLB:   "baseball_mlb",
+  NHL:   "icehockey_nhl",
+  NFL:   "americanfootball_nfl",
+  NCAAF: "americanfootball_ncaaf",
+  NCAAB: "basketball_ncaab",
+  EPL:   "soccer_epl",
 };
+
+const SHARP_BOOKS = ["pinnacle", "circa_sports"];
+const SOFT_BOOKS  = ["draftkings", "fanduel"];
+
+// Average no-vig probabilities across whichever sharp books posted this
+// market, so one stale/missing sharp line doesn't skew the "true" number.
+function blendedTrueProbs(decA, decB) {
+  const pairs = decA.map((a, i) => noVigProbs(a, decB[i]));
+  const pa = pairs.reduce((s, [x]) => s + x, 0) / pairs.length;
+  const pb = pairs.reduce((s, [, y]) => s + y, 0) / pairs.length;
+  const t = pa + pb;
+  return [pa / t, pb / t];
+}
 
 async function fetchTodaysGames() {
   const today = new Date().toISOString().slice(0, 10);
@@ -82,9 +94,9 @@ async function fetchTodaysGames() {
     try {
       const apiUrl =
         `https://api.the-odds-api.com/v4/sports/${key}/odds/` +
-        `?apiKey=${ODDS_KEY}&regions=us&markets=h2h` +
+        `?apiKey=${ODDS_KEY}&regions=us&markets=h2h,spreads,totals` +
         `&bookmakers=pinnacle,circa_sports,draftkings,fanduel,betmgm` +
-        `&oddsFormat=decimal&dateFormat=iso`;
+        `&oddsFormat=american&dateFormat=iso`;
 
       const { data } = await fetchJson(apiUrl);
       if (!Array.isArray(data)) continue;
@@ -92,42 +104,99 @@ async function fetchTodaysGames() {
       for (const game of data) {
         if (game.commence_time.slice(0, 10) !== today) continue;
 
-        const books = {};
+        const h2h = {}, spreads = {}, totals = {};
         for (const bm of game.bookmakers || []) {
-          const h2h = (bm.markets || []).find(m => m.key === "h2h");
-          if (!h2h) continue;
-          const ho = h2h.outcomes.find(o => o.name === game.home_team);
-          const ao = h2h.outcomes.find(o => o.name === game.away_team);
-          if (ho && ao) books[bm.key] = { hD: ho.price, aD: ao.price };
+          for (const m of bm.markets || []) {
+            if (m.key === "h2h") {
+              const ho = m.outcomes.find(o => o.name === game.home_team);
+              const ao = m.outcomes.find(o => o.name === game.away_team);
+              if (ho && ao) h2h[bm.key] = { home: ho.price, away: ao.price };
+            } else if (m.key === "spreads") {
+              const ho = m.outcomes.find(o => o.name === game.home_team);
+              const ao = m.outcomes.find(o => o.name === game.away_team);
+              if (ho && ao) spreads[bm.key] = {
+                home: { point: ho.point, price: ho.price },
+                away: { point: ao.point, price: ao.price },
+              };
+            } else if (m.key === "totals") {
+              const over  = m.outcomes.find(o => o.name === "Over");
+              const under = m.outcomes.find(o => o.name === "Under");
+              if (over && under) totals[bm.key] = {
+                over:  { point: over.point,  price: over.price },
+                under: { point: under.point, price: under.price },
+              };
+            }
+          }
         }
 
-        const sharp = books.pinnacle || books.circa_sports;
-        if (!sharp || !books.draftkings || !books.fanduel) continue;
+        const sharpsFor = market => SHARP_BOOKS.filter(b => market[b]);
+        const edges = [];
 
-        const [tH, tA] = noVigProbs(sharp.hD, sharp.aD);
-        const dk = books.draftkings;
-        const fd = books.fanduel;
+        // ── Moneyline ──
+        let sharps = sharpsFor(h2h);
+        if (sharps.length && (h2h.draftkings || h2h.fanduel)) {
+          const [tH, tA] = blendedTrueProbs(
+            sharps.map(b => toDecimal(h2h[b].home)),
+            sharps.map(b => toDecimal(h2h[b].away)),
+          );
+          for (const [side, trueProb] of [["home", tH], ["away", tA]]) {
+            let best = null;
+            for (const book of SOFT_BOOKS) {
+              const o = h2h[book]?.[side];
+              if (o === undefined) continue;
+              const ev = calcEV(trueProb, toDecimal(o));
+              if (!best || ev > best.ev) best = { book, price: o, point: null, ev };
+            }
+            if (best) edges.push({ market: "ml", side, sharpSource: sharps.join("+"), ...best });
+          }
+        }
+
+        // ── Spread ──
+        sharps = sharpsFor(spreads);
+        if (sharps.length && (spreads.draftkings || spreads.fanduel)) {
+          const [tH, tA] = blendedTrueProbs(
+            sharps.map(b => toDecimal(spreads[b].home.price)),
+            sharps.map(b => toDecimal(spreads[b].away.price)),
+          );
+          for (const [side, trueProb] of [["home", tH], ["away", tA]]) {
+            let best = null;
+            for (const book of SOFT_BOOKS) {
+              const o = spreads[book]?.[side];
+              if (!o) continue;
+              const ev = calcEV(trueProb, toDecimal(o.price));
+              if (!best || ev > best.ev) best = { book, price: o.price, point: o.point, ev };
+            }
+            if (best) edges.push({ market: "spread", side, sharpSource: sharps.join("+"), ...best });
+          }
+        }
+
+        // ── Total ──
+        sharps = sharpsFor(totals);
+        if (sharps.length && (totals.draftkings || totals.fanduel)) {
+          const [tO, tU] = blendedTrueProbs(
+            sharps.map(b => toDecimal(totals[b].over.price)),
+            sharps.map(b => toDecimal(totals[b].under.price)),
+          );
+          for (const [side, trueProb] of [["over", tO], ["under", tU]]) {
+            let best = null;
+            for (const book of SOFT_BOOKS) {
+              const o = totals[book]?.[side];
+              if (!o) continue;
+              const ev = calcEV(trueProb, toDecimal(o.price));
+              if (!best || ev > best.ev) best = { book, price: o.price, point: o.point, ev };
+            }
+            if (best) edges.push({ market: "total", side, sharpSource: sharps.join("+"), ...best });
+          }
+        }
+
+        if (!edges.length) continue;
 
         games.push({
           sport,
           home: game.home_team,
           away: game.away_team,
           time: game.commence_time,
-          sharpSource: books.pinnacle ? "Pinnacle" : "Circa",
-          truePctHome: (tH * 100).toFixed(1),
-          truePctAway: (tA * 100).toFixed(1),
-          pinnacleHome: toAmerican(sharp.hD),
-          pinnacleAway: toAmerican(sharp.aD),
-          dk: {
-            home: toAmerican(dk.hD), away: toAmerican(dk.aD),
-            homeEV: calcEV(tH, dk.hD).toFixed(1),
-            awayEV: calcEV(tA, dk.aD).toFixed(1),
-          },
-          fd: {
-            home: toAmerican(fd.hD), away: toAmerican(fd.aD),
-            homeEV: calcEV(tH, fd.hD).toFixed(1),
-            awayEV: calcEV(tA, fd.aD).toFixed(1),
-          },
+          edges,
         });
       }
     } catch (e) {
@@ -138,13 +207,15 @@ async function fetchTodaysGames() {
 }
 
 // ─── FETCH CLOSING LINE FOR A SPECIFIC GAME ──────────────────────────────────
-async function fetchGameOdds(sport, home, away) {
+async function fetchGameOdds(sport, home, away, betType) {
   const key = SPORTS[sport];
   if (!key) return null;
 
+  const marketKey = betType === "spread" ? "spreads" : betType === "total" ? "totals" : "h2h";
+
   const apiUrl =
     `https://api.the-odds-api.com/v4/sports/${key}/odds/` +
-    `?apiKey=${ODDS_KEY}&regions=us&markets=h2h` +
+    `?apiKey=${ODDS_KEY}&regions=us&markets=${marketKey}` +
     `&bookmakers=draftkings,fanduel&oddsFormat=american&dateFormat=iso`;
 
   const { data } = await fetchJson(apiUrl);
@@ -155,13 +226,23 @@ async function fetchGameOdds(sport, home, away) {
 
   const books = {};
   for (const bm of game.bookmakers || []) {
-    const h2h = (bm.markets || []).find(m => m.key === "h2h");
-    if (!h2h) continue;
-    const ho = h2h.outcomes.find(o => o.name === game.home_team);
-    const ao = h2h.outcomes.find(o => o.name === game.away_team);
-    books[bm.key] = { home: ho?.price, away: ao?.price };
+    const m = (bm.markets || []).find(mm => mm.key === marketKey);
+    if (!m) continue;
+
+    if (marketKey === "totals") {
+      const over  = m.outcomes.find(o => o.name === "Over");
+      const under = m.outcomes.find(o => o.name === "Under");
+      books[bm.key] = { over: over?.price, under: under?.price, point: over?.point ?? null };
+    } else {
+      const ho = m.outcomes.find(o => o.name === game.home_team);
+      const ao = m.outcomes.find(o => o.name === game.away_team);
+      books[bm.key] = {
+        home: ho?.price, away: ao?.price,
+        homePoint: ho?.point ?? null, awayPoint: ao?.point ?? null,
+      };
+    }
   }
-  return { home: game.home_team, away: game.away_team, books };
+  return { home: game.home_team, away: game.away_team, market: marketKey, books };
 }
 
 // ─── FETCH COMPLETED SCORES FOR AUTO-SETTLING PICKS ──────────────────────────
@@ -221,40 +302,51 @@ async function generatePicks(games) {
 
   if (!games.length) throw new Error("No games with valid odds found for today");
 
-  // Sort by best single-side EV
+  // Sort by best edge found anywhere in the game (ML, spread, or total)
   games.sort((a, b) => {
-    const bestA = Math.max(parseFloat(a.dk.homeEV), parseFloat(a.dk.awayEV), parseFloat(a.fd.homeEV), parseFloat(a.fd.awayEV));
-    const bestB = Math.max(parseFloat(b.dk.homeEV), parseFloat(b.dk.awayEV), parseFloat(b.fd.homeEV), parseFloat(b.fd.awayEV));
+    const bestA = Math.max(...a.edges.map(e => e.ev));
+    const bestB = Math.max(...b.edges.map(e => e.ev));
     return bestB - bestA;
   });
 
-  const gameLines = games.slice(0, 15).map(g => {
+  const sideName  = (g, e) => e.market === "total" ? (e.side === "over" ? "Over" : "Under") : (e.side === "home" ? g.home : g.away);
+  const betLabel  = (g, e) => {
+    const name = sideName(g, e);
+    if (e.market === "ml")     return `${name} ML`;
+    if (e.market === "spread") return `${name} ${e.point > 0 ? "+" : ""}${e.point}`;
+    return `${name} ${e.point}`;
+  };
+
+  const gameLines = games.slice(0, 20).map(g => {
     const t = new Date(g.time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
-    return (
-      `${g.sport}: ${g.away} @ ${g.home} (${t})` +
-      ` | True: Away ${g.truePctAway}% Home ${g.truePctHome}%` +
-      ` | Pinnacle: Away ${g.pinnacleAway} Home ${g.pinnacleHome}` +
-      ` | DK: Away ${g.dk.away}(EV${g.dk.awayEV}%) Home ${g.dk.home}(EV${g.dk.homeEV}%)` +
-      ` | FD: Away ${g.fd.away}(EV${g.fd.awayEV}%) Home ${g.fd.home}(EV${g.fd.homeEV}%)`
-    );
+    const edgeLines = g.edges
+      .map(e => `${betLabel(g, e)} ${e.price > 0 ? "+" : ""}${e.price} (${e.book}, EV ${e.ev >= 0 ? "+" : ""}${e.ev.toFixed(1)}%, vs ${e.sharpSource})`)
+      .join(" | ");
+    return `${g.sport}: ${g.away} @ ${g.home} (${t}) — ${edgeLines}`;
   }).join("\n");
 
   const prompt =
     `You are the sharpest sports bettor alive. Today is ${today}.\n\n` +
-    `Here are today's real games with exact EV vs ${games[0]?.sharpSource || "Pinnacle"} no-vig:\n\n` +
+    `Here are today's real games across every tracked sport/league. For each game, the moneyline, spread, and total are listed ` +
+    `with the best-priced book for each side and that side's exact EV vs the blended sharp no-vig line (Pinnacle and/or Circa):\n\n` +
     `${gameLines}\n\n` +
-    `Pick ONLY bets that represent a real, sharp edge — positive EV vs the no-vig sharp line above, ideally +2% EV or better.\n` +
-    `Return AT MOST 3 bets, ranked best first. If only 1 or 2 games today clear that bar, return only those — ` +
-    `do NOT pad the list with mediocre or break-even bets just to reach 3. If genuinely nothing clears the bar, return an empty "bets" array.\n` +
+    `Pick ONLY bets that represent a real, sharp edge — positive EV vs the sharp no-vig line above, ideally +2% EV or better. ` +
+    `Moneyline, spread, and total bets are all fair game — pick whichever market shows the strongest genuine edge for a given game.\n` +
+    `Return AT MOST 3 bets total, ranked best first, ONE PICK PER GAME — never return the same matchup twice, even at a different book or in a different market. ` +
+    `If only 1 or 2 games today clear the bar, return only those — do NOT pad the list with mediocre or break-even bets just to reach 3. ` +
+    `If genuinely nothing clears the bar, return an empty "bets" array.\n` +
     `These picks are locked in for the entire day and tracked for real money, so be selective and consistent — ` +
-    `use ONLY the exact odds and EV numbers from the data above.\n` +
+    `use ONLY the exact odds, points, and EV numbers from the data above.\n` +
     `Prioritise: highest positive EV, playoff/high-stakes spots, RLM signals.\n` +
     `Signal: EV (price value), STEAM (sharp syndicate action), RLM (reverse line movement), ARB (both sides +EV).\n\n` +
+    `For each bet set "betType" to "ml", "spread", or "total". Set "side" to "home"/"away" for ml and spread bets, or "over"/"under" for total bets. ` +
+    `Set "line" to the spread/total number shown above (e.g. -4.5, 218.5), or null for ml. ` +
+    `Set "bet" to a short human label matching the format above, e.g. "Lakers +4.5", "Over 218.5", "Celtics ML".\n\n` +
     `Return ONLY valid JSON, no markdown, no comments. The "bets" array should contain only as many entries (0-3) as genuinely clear the bar — example shows the shape for 3, trim it down if fewer qualify:\n` +
     `{"date":"${today}","bets":[` +
-    `{"rank":1,"sport":"MLB","matchup":"Team A @ Team B","bet":"Team A ML","book":"DraftKings","odds":"+115","ev":"+4.2%","confidence":82,"reasoning":"2 sentence sharp reasoning using the real numbers above.","signal":"EV"},` +
-    `{"rank":2,"sport":"NBA","matchup":"Team C @ Team D","bet":"Team C ML","book":"FanDuel","odds":"-108","ev":"+2.9%","confidence":77,"reasoning":"Sharp reasoning.","signal":"RLM"},` +
-    `{"rank":3,"sport":"MLB","matchup":"Team E @ Team F","bet":"Team E ML","book":"DraftKings","odds":"+108","ev":"+3.1%","confidence":74,"reasoning":"Sharp reasoning.","signal":"STEAM"}]}`;
+    `{"rank":1,"sport":"NBA","matchup":"Team A @ Team B","betType":"spread","side":"away","line":4.5,"bet":"Team A +4.5","book":"DraftKings","odds":"+105","ev":"+3.2%","confidence":78,"reasoning":"2 sentence sharp reasoning using the real numbers above.","signal":"EV"},` +
+    `{"rank":2,"sport":"MLB","matchup":"Team C @ Team D","betType":"ml","side":"home","line":null,"bet":"Team D ML","book":"FanDuel","odds":"-108","ev":"+2.9%","confidence":77,"reasoning":"Sharp reasoning.","signal":"RLM"},` +
+    `{"rank":3,"sport":"NHL","matchup":"Team E @ Team F","betType":"total","side":"under","line":5.5,"bet":"Under 5.5","book":"DraftKings","odds":"-105","ev":"+3.1%","confidence":74,"reasoning":"Sharp reasoning.","signal":"STEAM"}]}`;
 
   const { data } = await fetchJson("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -360,11 +452,11 @@ app.get("/api/picks", async (req, res) => {
 app.get("/api/closing-line", async (req, res) => {
   if (!ODDS_KEY) return res.status(500).json({ error: "ODDS_API_KEY not set." });
 
-  const { sport, home, away } = req.query;
+  const { sport, home, away, betType } = req.query;
   if (!sport || !home || !away) return res.status(400).json({ error: "Missing sport, home, or away." });
 
   try {
-    const result = await fetchGameOdds(sport, home, away);
+    const result = await fetchGameOdds(sport, home, away, betType);
     if (!result) return res.status(404).json({ error: "Game not found — it may not have posted odds yet, or has already finished." });
     res.json(result);
   } catch (e) {

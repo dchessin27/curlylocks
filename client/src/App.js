@@ -397,13 +397,38 @@ export default function App() {
   function addToRecord(bet, date) {
     // matchup format from Claude is "Away @ Home"
     const [away, home] = (bet.matchup || "").split("@").map(s => s.trim());
-    const entry = { id: Date.now()+Math.random(), date, bet:bet.bet, sport:bet.sport, signal:bet.signal, book:bet.book, odds:parseOdds(bet.odds), ev:bet.ev, confidence:bet.confidence, matchup:bet.matchup, home, away, result:"pending", closingLine:null };
+    const entry = { id: Date.now()+Math.random(), date, bet:bet.bet, sport:bet.sport, signal:bet.signal, book:bet.book, odds:parseOdds(bet.odds), ev:bet.ev, confidence:bet.confidence, matchup:bet.matchup, home, away, betType:bet.betType || "ml", side:bet.side || null, line:bet.line ?? null, result:"pending", closingLine:null };
     const u = [entry, ...record]; setRecord(u); saveRecord(u);
   }
   function settle(id, result)  { const u = record.map(p => p.id===id ? {...p,result} : p); setRecord(u); saveRecord(u); }
   function deletePick(id)      { const u = record.filter(p => p.id!==id); setRecord(u); saveRecord(u); }
   function removeFromRecord(bet, date) {
     const u = record.filter(p => !(p.bet===bet.bet && p.date===date)); setRecord(u); saveRecord(u);
+  }
+
+  function gradeBet(p, game) {
+    const betType = p.betType || "ml";
+    const side = p.side || (p.bet.includes(p.home) ? "home" : "away");
+
+    if (betType === "total") {
+      if (p.line === null || p.line === undefined) return null;
+      const total = game.homeScore + game.awayScore;
+      if (total === p.line) return "push";
+      const overHit = total > p.line;
+      return (side === "over") === overHit ? "win" : "loss";
+    }
+
+    if (betType === "spread") {
+      if (p.line === null || p.line === undefined) return null;
+      const margin = side === "home" ? (game.homeScore - game.awayScore) : (game.awayScore - game.homeScore);
+      const adjusted = margin + p.line;
+      if (adjusted === 0) return "push";
+      return adjusted > 0 ? "win" : "loss";
+    }
+
+    if (game.homeScore === game.awayScore) return "push";
+    const winner = game.homeScore > game.awayScore ? "home" : "away";
+    return side === winner ? "win" : "loss";
   }
 
   async function autoSettleRecord() {
@@ -425,12 +450,8 @@ export default function App() {
       const game = (scoresBySport[p.sport] || []).find(g => g.home === p.home && g.away === p.away);
       if (!game) continue;
 
-      let result;
-      if (game.homeScore === game.awayScore) result = "push";
-      else {
-        const winner = game.homeScore > game.awayScore ? p.home : p.away;
-        result = p.bet.includes(winner) ? "win" : "loss";
-      }
+      const result = gradeBet(p, game);
+      if (!result) continue;
       updated = updated.map(x => x.id === p.id ? { ...x, result } : x);
       changed = true;
     }
@@ -444,13 +465,20 @@ export default function App() {
     const updates = {};
     for (const p of targets) {
       try {
-        const r = await fetch(`/api/closing-line?sport=${encodeURIComponent(p.sport)}&home=${encodeURIComponent(p.home)}&away=${encodeURIComponent(p.away)}`);
+        const betType = p.betType || "ml";
+        const r = await fetch(`/api/closing-line?sport=${encodeURIComponent(p.sport)}&home=${encodeURIComponent(p.home)}&away=${encodeURIComponent(p.away)}&betType=${encodeURIComponent(betType)}`);
         const body = await r.json();
         if (!r.ok) continue;
         const bk = body.books?.[p.book.toLowerCase()];
         if (!bk) continue;
-        const isHome = p.bet.includes(body.home);
-        const price = isHome ? bk.home : bk.away;
+
+        let price;
+        if (betType === "total") {
+          price = p.side === "under" ? bk.under : bk.over;
+        } else {
+          const side = p.side || (p.bet.includes(body.home) ? "home" : "away");
+          price = side === "home" ? bk.home : bk.away;
+        }
         if (price !== undefined && price !== null) updates[p.id] = price;
       } catch {}
     }
