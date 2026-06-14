@@ -62,13 +62,13 @@ function fetchJson(reqUrl, opts = {}) {
 }
 
 // ─── FETCH LIVE ODDS ──────────────────────────────────────────────────────────
+// Each sport here costs one Odds API request per picks attempt (free tier =
+// 500/month). NFL/NCAAF/NCAAB are off-season through summer — re-add them
+// when their seasons start (NFL/NCAAF ~August, NCAAB ~November).
 const SPORTS = {
   NBA:   "basketball_nba",
   MLB:   "baseball_mlb",
   NHL:   "icehockey_nhl",
-  NFL:   "americanfootball_nfl",
-  NCAAF: "americanfootball_ncaaf",
-  NCAAB: "basketball_ncaab",
 };
 
 const SHARP_BOOKS = ["pinnacle", "circa_sports"];
