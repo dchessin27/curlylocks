@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const express = require("express");
 const https   = require("https");
+const fs      = require("fs");
 const path    = require("path");
 const url     = require("url");
 
@@ -11,6 +12,11 @@ const CLAUDE_KEY = process.env.CLAUDE_API_KEY || "";
 const PORT       = parseInt(process.env.PORT  || "3747");
 const TG_TOKEN   = process.env.TELEGRAM_BOT_TOKEN || "";
 const TG_CHAT_ID = process.env.TELEGRAM_CHAT_ID   || "";
+
+// Set DATA_DIR to a mounted Railway volume (e.g. /data) for picks to
+// survive redeploys. Defaults to a local folder for plain restarts.
+const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, "data");
+const PICKS_FILE = path.join(DATA_DIR, "picks-cache.json");
 
 app.use(express.json());
 
@@ -158,6 +164,50 @@ async function fetchGameOdds(sport, home, away) {
   return { home: game.home_team, away: game.away_team, books };
 }
 
+// ─── FETCH COMPLETED SCORES FOR AUTO-SETTLING PICKS ──────────────────────────
+async function fetchSportScores(sport) {
+  const key = SPORTS[sport];
+  if (!key) return [];
+
+  const apiUrl =
+    `https://api.the-odds-api.com/v4/sports/${key}/scores/` +
+    `?apiKey=${ODDS_KEY}&daysFrom=3&dateFormat=iso`;
+
+  const { data } = await fetchJson(apiUrl);
+  if (!Array.isArray(data)) return [];
+
+  return data
+    .filter(g => g.completed && Array.isArray(g.scores))
+    .map(g => {
+      const hs = g.scores.find(s => s.name === g.home_team);
+      const as = g.scores.find(s => s.name === g.away_team);
+      return {
+        home: g.home_team,
+        away: g.away_team,
+        homeScore: Number(hs?.score),
+        awayScore: Number(as?.score),
+      };
+    })
+    .filter(g => Number.isFinite(g.homeScore) && Number.isFinite(g.awayScore));
+}
+
+// ─── PICKS CACHE (SURVIVES RESTARTS) ─────────────────────────────────────────
+function loadCachedPicks() {
+  try {
+    return JSON.parse(fs.readFileSync(PICKS_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function saveCachedPicks(picks) {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(PICKS_FILE, JSON.stringify(picks));
+  } catch (e) {
+    console.warn("[cache] failed to save picks:", e.message);
+  }
+}
+
 // ─── DATE HELPER ──────────────────────────────────────────────────────────────
 function todayLabel() {
   return new Date().toLocaleDateString("en-US", {
@@ -249,8 +299,8 @@ async function sendTelegram(text) {
   }
 }
 
-let latestPicks = null;     // most recently generated picks, with commenceTime per bet
-const alertedBets = new Set(); // keys of bets we've already alerted on, "date|matchup|bet"
+let latestPicks = loadCachedPicks(); // most recently generated picks, with commenceTime per bet
+const alertedBets = new Set();       // keys of bets we've already alerted on, "date|matchup|bet"
 
 setInterval(() => {
   if (!latestPicks?.bets?.length) return;
@@ -299,6 +349,7 @@ app.get("/api/picks", async (req, res) => {
     const picks = await generatePicks(games);
     console.log("[picks] ✓ Done");
     latestPicks = picks;
+    saveCachedPicks(picks);
     res.json(picks);
   } catch (e) {
     console.error("[picks] Error:", e.message);
@@ -316,6 +367,20 @@ app.get("/api/closing-line", async (req, res) => {
     const result = await fetchGameOdds(sport, home, away);
     if (!result) return res.status(404).json({ error: "Game not found — it may not have posted odds yet, or has already finished." });
     res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/results", async (req, res) => {
+  if (!ODDS_KEY) return res.status(500).json({ error: "ODDS_API_KEY not set." });
+
+  const { sport } = req.query;
+  if (!sport) return res.status(400).json({ error: "Missing sport." });
+
+  try {
+    const games = await fetchSportScores(sport);
+    res.json({ games });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

@@ -207,7 +207,8 @@ function RecordTab({ record, bankroll, unitPct, onSettle, onDelete, onSyncClosin
 
               {pending.length > 0 && (
                 <div>
-                  <div style={{ fontSize:9, color:"#c8a84b", letterSpacing:1, marginBottom:8 }}>PENDING ({pending.length})</div>
+                  <div style={{ fontSize:9, color:"#c8a84b", letterSpacing:1, marginBottom:2 }}>PENDING ({pending.length})</div>
+                  <div style={{ fontSize:8, color:"#334455", marginBottom:8 }}>Results auto-check against final scores each time the app loads.</div>
                   {pending.map(p => (
                     <div key={p.id} style={{ background:"#0c0c18", border:"1px solid #1a1a2e", borderRadius:7, padding:"10px 12px", marginBottom:6, display:"flex", justifyContent:"space-between", alignItems:"center", gap:10 }}>
                       <div style={{ minWidth:0 }}>
@@ -372,7 +373,7 @@ export default function App() {
   const [settings, setSettings] = useState(() => loadSettings());
   const { bankroll, unitPct } = settings;
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); autoSettleRecord(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load() {
     setStatus("loading"); setError(null);
@@ -403,6 +404,37 @@ export default function App() {
   function deletePick(id)      { const u = record.filter(p => p.id!==id); setRecord(u); saveRecord(u); }
   function removeFromRecord(bet, date) {
     const u = record.filter(p => !(p.bet===bet.bet && p.date===date)); setRecord(u); saveRecord(u);
+  }
+
+  async function autoSettleRecord() {
+    const pending = record.filter(p => p.result === "pending" && p.home && p.away && p.sport);
+    if (!pending.length) return;
+
+    const sports = [...new Set(pending.map(p => p.sport))];
+    const scoresBySport = {};
+    for (const sport of sports) {
+      try {
+        const r = await fetch(`/api/results?sport=${encodeURIComponent(sport)}`);
+        const body = await r.json();
+        if (r.ok) scoresBySport[sport] = body.games || [];
+      } catch {}
+    }
+
+    let updated = record, changed = false;
+    for (const p of pending) {
+      const game = (scoresBySport[p.sport] || []).find(g => g.home === p.home && g.away === p.away);
+      if (!game) continue;
+
+      let result;
+      if (game.homeScore === game.awayScore) result = "push";
+      else {
+        const winner = game.homeScore > game.awayScore ? p.home : p.away;
+        result = p.bet.includes(winner) ? "win" : "loss";
+      }
+      updated = updated.map(x => x.id === p.id ? { ...x, result } : x);
+      changed = true;
+    }
+    if (changed) { setRecord(updated); saveRecord(updated); }
   }
 
   async function syncClosingLines() {

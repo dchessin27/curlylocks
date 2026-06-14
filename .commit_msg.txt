@@ -1,0 +1,11 @@
+Persist daily picks to disk and auto-settle wins/losses from final scores
+
+Picks are now cached to server/data/picks-cache.json (configurable via
+DATA_DIR) and reloaded on startup, so the locked-in picks for the day
+survive server restarts, not just in-memory reloads. For Railway,
+mount a Volume and set DATA_DIR to make this survive redeploys too.
+
+Added /api/results?sport=X, which pulls completed game scores from The
+Odds API. On every app load, pending picks are automatically checked
+against final scores and marked win/loss/push without any manual
+button click, so the record tab's hit rate stays current on its own.

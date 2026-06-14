@@ -4,3 +4,4 @@ client/build/
 .env
 .DS_Store
 mnt/
+server/data/
