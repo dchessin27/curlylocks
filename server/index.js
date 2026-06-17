@@ -94,9 +94,10 @@ async function fetchTodaysGames() {
     }
   }
 
-  // Compute line-movement / liability signals for today's games only.
-  const todayRaw    = rawAll.filter(g => g.commence_time.slice(0, 10) === today);
-  const liabilityMap = computeLiability(LINES_FILE, todayRaw);
+  // Track lines for ALL upcoming games across every sport — not just today's.
+  // This means a Sunday NFL game picked up on Tuesday already has 5 days of
+  // movement history by game day, making frozen/reverse signals much stronger.
+  const liabilityMap = computeLiability(LINES_FILE, rawAll);
   for (const g of games) {
     const sigs = liabilityMap[g.id];
     if (sigs && sigs.length) g.liability = sigs;
