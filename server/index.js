@@ -469,6 +469,56 @@ app.get("/api/backtest", async (req, res) => {
   }
 });
 
+// Single historical snapshot probe — fast, just 1 API call (~30 credits).
+// Returns the raw snapshot so you can verify bookmaker availability.
+// Example: /api/backtest-probe?sport=MLB&date=2026-06-15
+app.get("/api/backtest-probe", async (req, res) => {
+  if (!ODDS_KEY) return res.status(500).json({ error: "ODDS_API_KEY not set." });
+
+  const sport    = (req.query.sport || "MLB").toUpperCase();
+  const sportKey = SPORTS[sport];
+  if (!sportKey) return res.status(400).json({ error: `Unknown sport. Options: ${Object.keys(SPORTS).join(", ")}` });
+
+  const dateStr = req.query.date || (() => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - 1);
+    return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  })();
+
+  const hourET = parseInt(req.query.hour || "11");
+  const utcHour = (hourET + 4) % 24;
+  const isoTimestamp = `${dateStr}T${String(utcHour).padStart(2, "0")}:00:00Z`;
+
+  const apiUrl =
+    `https://api.the-odds-api.com/v4/historical/sports/${sportKey}/odds/` +
+    `?apiKey=${ODDS_KEY}&regions=us&markets=h2h,spreads,totals` +
+    `&bookmakers=pinnacle,circa_sports,draftkings,fanduel,betmgm` +
+    `&oddsFormat=american&dateFormat=iso&date=${encodeURIComponent(isoTimestamp)}`;
+
+  try {
+    const { data: wrapper, status } = await fetchJson(apiUrl);
+    if (!Array.isArray(wrapper?.data)) {
+      return res.json({ error: `API HTTP ${status}`, raw: wrapper });
+    }
+    const games = wrapper.data;
+    const summary = games.map(g => ({
+      id: g.id,
+      home: g.home_team,
+      away: g.away_team,
+      commence_time: g.commence_time,
+      books: (g.bookmakers || []).map(b => b.key),
+    }));
+    res.json({
+      sport, dateStr, isoTimestamp,
+      snapshotTimestamp: wrapper.timestamp,
+      gameCount: games.length,
+      games: summary,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Catch-all — serve React app
 app.get("*", (req, res) => {
   const index = path.join(clientBuild, "index.html");

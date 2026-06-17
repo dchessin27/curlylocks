@@ -40,8 +40,10 @@ async function fetchHistoricalSnapshot(sportKey, isoTimestamp, oddsKey) {
 
   // Historical endpoint returns { timestamp, previous_timestamp, next_timestamp, data: [...] }
   // rather than a raw array like the live /odds endpoint.
-  const { data: wrapper } = await fetchJson(apiUrl);
-  if (!Array.isArray(wrapper?.data)) return [];
+  const { data: wrapper, status } = await fetchJson(apiUrl);
+  if (!Array.isArray(wrapper?.data)) {
+    throw new Error(`API returned HTTP ${status}: ${JSON.stringify(wrapper).slice(0, 300)}`);
+  }
   return wrapper.data;
 }
 
