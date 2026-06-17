@@ -23,6 +23,7 @@ const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, "data");
 const PICKS_FILE   = path.join(DATA_DIR, "picks-cache.json");
 const HISTORY_FILE = path.join(DATA_DIR, "picks-history.json");
 const LINES_FILE   = path.join(DATA_DIR, "line-history.json");
+const CAPPER_FILE  = path.join(DATA_DIR, "capper-history.json");
 
 app.use(express.json());
 
@@ -236,6 +237,20 @@ function updateHistoryClosingLine(date, betLabel, closingLine) {
   } catch (e) { console.warn("[history] update closing line failed:", e.message); }
 }
 
+// ─── HANDICAPPER REFERENCE PICKS ──────────────────────────────────────────────
+// Stores raw daily picks text submitted by the user via /api/capper POST.
+// These are fed to Claude as market context (not tracked for W/L).
+function loadCapperHistory() {
+  try { return JSON.parse(fs.readFileSync(CAPPER_FILE, "utf8")); }
+  catch { return []; }
+}
+function saveCapperHistory(history) {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(CAPPER_FILE, JSON.stringify(history));
+  } catch (e) { console.warn("[capper] save failed:", e.message); }
+}
+
 // ─── DATE HELPER ──────────────────────────────────────────────────────────────
 // US sports books treat the "game day" as the Eastern-time calendar day. Pin
 // the picks-lock boundary to that timezone regardless of where the server
@@ -330,6 +345,20 @@ async function generatePicks(games) {
     `{"rank":2,"sport":"MLB","matchup":"Team C @ Team D","betType":"ml","side":"home","line":null,"bet":"Team D ML","book":"FanDuel","odds":"-108","ev":"+2.9%","confidence":77,"reasoning":"Sharp reasoning.","signal":"CONSENSUS","liability":false},` +
     `{"rank":3,"sport":"NHL","matchup":"Team E @ Team F","betType":"total","side":"under","line":5.5,"bet":"Under 5.5","book":"DraftKings","odds":"-105","ev":"+3.1%","confidence":74,"reasoning":"Sharp reasoning.","signal":"CONFLUENCE","liability":false}]}`;
 
+  // Include today's handicapper reference picks as market context if available.
+  const capperHistory = loadCapperHistory();
+  const todayCapper   = capperHistory.find(h => h.date === today);
+  let fullPrompt = prompt;
+  if (todayCapper) {
+    fullPrompt +=
+      `\n\nMARKET REFERENCE — A sharp handicapper service has issued these plays for today. ` +
+      `Use them as additional market intelligence: they represent another experienced view of today's value. ` +
+      `When they align with a pick already justified by the EV data above, that corroboration strengthens the signal — note it in your reasoning. ` +
+      `When they conflict with your EV analysis, note the discrepancy — do NOT override your EV data just to match them. ` +
+      `Do not pick a game solely because it appears here; EV from the odds data is still the primary filter.\n` +
+      `Reference picks:\n${todayCapper.picks}`;
+  }
+
   const { data } = await fetchJson("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": CLAUDE_KEY, "anthropic-version": "2023-06-01" },
@@ -337,7 +366,7 @@ async function generatePicks(games) {
       model: "claude-sonnet-4-6",
       max_tokens: 1000,
       temperature: 0,
-      messages: [{ role: "user", content: prompt }],
+      messages: [{ role: "user", content: fullPrompt }],
     }),
   });
 
@@ -616,6 +645,29 @@ app.get("/api/backtest-probe", async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// Store / retrieve handicapper reference picks.
+// POST { picks: "ROCKIES CUBS OVER 10\nCARDINALS ML..." } — saved as today's entry.
+// GET returns the full history array for optional inspection.
+app.post("/api/capper", (req, res) => {
+  const picks = (req.body?.picks || "").trim();
+  if (!picks) return res.status(400).json({ error: "No picks provided" });
+
+  const today   = todayLabel();
+  const history = loadCapperHistory();
+  const idx     = history.findIndex(h => h.date === today);
+  const entry   = { date: today, picks, submittedAt: new Date().toISOString() };
+  if (idx >= 0) history[idx] = entry;
+  else history.push(entry);
+  saveCapperHistory(history);
+
+  console.log(`[capper] ${history.length > 1 && idx >= 0 ? "updated" : "saved"} ${today} (${picks.split("\n").length} picks)`);
+  res.json({ ok: true, date: today, count: picks.split("\n").filter(Boolean).length });
+});
+
+app.get("/api/capper", (req, res) => {
+  res.json(loadCapperHistory());
 });
 
 // Catch-all — serve React app
