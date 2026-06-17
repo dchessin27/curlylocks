@@ -56,7 +56,7 @@ function calcCLVStats(picks) {
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const SC  = { NFL:"#cef17b", NBA:"#e85d3a", MLB:"#4aade8", NHL:"#7ecfcf", MMA:"#ff5e62", WORLDCUP:"#e8c84a" };
 const SI  = { NFL:"🏈", NBA:"🏀", MLB:"⚾", NHL:"🏒", MMA:"🥊", WORLDCUP:"⚽" };
-const SGC = { EV:"#cef17b", STEAM:"#ff8866", RLM:"#aa88ff", ARB:"#22ff99" };
+const SGC = { EV:"#cef17b", CONSENSUS:"#22ff99", CONFLUENCE:"#4a9fff" };
 const SLOT_SYMBOLS = ["🔒","7️⃣","🍒","💰","⭐","🍀"];
 const RM  = [
   { label:"LOCK #1", emoji:"🥇", border:"#cef17b", glow:"#cef17b33" },
@@ -105,6 +105,64 @@ function ScoreRow({ label, picks, color, bankroll, unitPct=1 }) {
   );
 }
 
+// ─── CLV HISTORY HELPERS ─────────────────────────────────────────────────────
+function histCLV(b) {
+  if (b.closingLine === null || b.closingLine === undefined) return null;
+  return (oddsToDecimal(parseOdds(b.odds)) / oddsToDecimal(b.closingLine) - 1) * 100;
+}
+
+function calcHistoryStats(history) {
+  const betsWithClose = history.flatMap(d => d.bets).filter(b => histCLV(b) !== null);
+  if (!betsWithClose.length) return null;
+  const values = betsWithClose.map(histCLV);
+  const avg = values.reduce((s, v) => s + v, 0) / values.length;
+  const beat = values.filter(v => v > 0).length;
+
+  const bySig = {};
+  for (const b of betsWithClose) {
+    const sig = b.signal || "EV";
+    if (!bySig[sig]) bySig[sig] = [];
+    bySig[sig].push(histCLV(b));
+  }
+  const sigStats = Object.fromEntries(
+    Object.entries(bySig).map(([sig, vals]) => {
+      const a = vals.reduce((s, v) => s + v, 0) / vals.length;
+      const bp = (vals.filter(v => v > 0).length / vals.length) * 100;
+      return [sig, { n: vals.length, avgCLV: a, beatPct: bp }];
+    })
+  );
+
+  const dailyCLV = history.map(day => {
+    const vals = day.bets.map(histCLV).filter(v => v !== null);
+    if (!vals.length) return null;
+    return { date: day.date, avg: vals.reduce((s, v) => s + v, 0) / vals.length, n: vals.length };
+  }).filter(Boolean);
+
+  return { n: betsWithClose.length, avg, beat, total: values.length, sigStats, dailyCLV };
+}
+
+function CLVSparkline({ dailyCLV }) {
+  if (!dailyCLV.length) return null;
+  const W = 320, H = 56, padX = 4;
+  const maxAbs = Math.max(...dailyCLV.map(d => Math.abs(d.avg)), 0.5);
+  const barW = Math.max(6, Math.floor((W - padX * 2) / dailyCLV.length) - 2);
+  const zeroY = H / 2;
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display:"block", overflow:"visible" }}>
+      <line x1={padX} y1={zeroY} x2={W - padX} y2={zeroY} stroke="#1a3329" strokeWidth={1} />
+      {dailyCLV.map((d, i) => {
+        const x = padX + i * (barW + 2);
+        const barH = Math.max((Math.abs(d.avg) / maxAbs) * (zeroY - 6), 2);
+        const pos = d.avg >= 0;
+        return (
+          <rect key={i} x={x} y={pos ? zeroY - barH : zeroY} width={barW}
+            height={barH} fill={pos ? "#22ff99" : "#ff5544"} opacity={0.75} rx={1} />
+        );
+      })}
+    </svg>
+  );
+}
+
 // ─── RECORD TAB ───────────────────────────────────────────────────────────────
 function CLVBadge({ pick }) {
   const clv = calcCLV(pick);
@@ -116,7 +174,7 @@ function CLVBadge({ pick }) {
   );
 }
 
-function RecordTab({ record, bankroll, unitPct, onSettle, onDelete, onSyncClosingLines, syncingCLV }) {
+function RecordTab({ record, bankroll, unitPct, onSettle, onDelete, onSyncClosingLines, syncingCLV, history }) {
   const [view, setView] = useState("overview");
   const overall  = calcStats(record);
   const bySport  = groupBy(record, "sport");
@@ -130,7 +188,7 @@ function RecordTab({ record, bankroll, unitPct, onSettle, onDelete, onSyncClosin
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
       <div style={{ display:"flex", background:"#071210", border:"1px solid #0f2e22", borderRadius:8, padding:3 }}>
-        {[["overview","📊 Overview"],["sport","🏆 Sport"],["signal","⚡ Signal"],["history","📋 History"]].map(([k,l]) => (
+        {[["overview","📊 Overview"],["clv","📈 CLV"],["sport","🏆 Sport"],["signal","⚡ Signal"],["history","📋 History"]].map(([k,l]) => (
           <button key={k} onClick={() => setView(k)} style={{ ...btn(view===k), padding:"5px 0", fontSize:9 }}>{l}</button>
         ))}
       </div>
@@ -235,6 +293,79 @@ function RecordTab({ record, bankroll, unitPct, onSettle, onDelete, onSyncClosin
           }
         </div>
       )}
+
+      {view === "clv" && (() => {
+        const hs = calcHistoryStats(history || []);
+        const clvc = hs && hs.avg >= 0 ? "#22ff99" : "#ff5544";
+        return (
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            {!hs ? (
+              <div style={{ textAlign:"center", padding:"50px 0", color:"#2c5443", fontSize:10, lineHeight:2 }}>
+                No CLV data yet.<br/>
+                Closing lines are captured automatically ~10 min before each game.<br/>
+                Check back after tonight's games tip off.
+              </div>
+            ) : (
+              <>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                  <div style={{ background:"#08140f", border:`1px solid ${clvc}33`, borderRadius:8, padding:"14px 16px" }}>
+                    <div style={{ fontSize:9, color:"#3f6b58", letterSpacing:1, marginBottom:6 }}>AVG CLV</div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:30, fontWeight:800, color:clvc }}>
+                      {hs.avg >= 0 ? "+" : ""}{hs.avg.toFixed(2)}%
+                    </div>
+                    <div style={{ fontSize:9, color:"#3f6b58", marginTop:3 }}>{hs.n} picks with close</div>
+                  </div>
+                  <div style={{ background:"#08140f", border:`1px solid ${clvc}33`, borderRadius:8, padding:"14px 16px" }}>
+                    <div style={{ fontSize:9, color:"#3f6b58", letterSpacing:1, marginBottom:6 }}>BEAT CLOSE</div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:30, fontWeight:800, color:clvc }}>
+                      {((hs.beat / hs.n) * 100).toFixed(0)}%
+                    </div>
+                    <div style={{ fontSize:9, color:"#3f6b58", marginTop:3 }}>{hs.beat}/{hs.n} picks</div>
+                  </div>
+                </div>
+
+                {hs.dailyCLV.length > 1 && (
+                  <div style={{ background:"#08140f", border:"1px solid #0f2e22", borderRadius:8, padding:"12px 14px" }}>
+                    <div style={{ fontSize:9, color:"#3f6b58", letterSpacing:1, marginBottom:10 }}>DAILY CLV TREND</div>
+                    <CLVSparkline dailyCLV={hs.dailyCLV} />
+                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:8, color:"#2c5443", marginTop:6 }}>
+                      <span>{hs.dailyCLV[0].date.split(",")[1]?.trim()}</span>
+                      <span>{hs.dailyCLV[hs.dailyCLV.length - 1].date.split(",")[1]?.trim()}</span>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ background:"#08140f", border:"1px solid #0f2e22", borderRadius:8, padding:"12px 14px" }}>
+                  <div style={{ fontSize:9, color:"#3f6b58", letterSpacing:1, marginBottom:10 }}>CLV BY SIGNAL</div>
+                  {Object.entries(hs.sigStats).sort((a, b) => b[1].avgCLV - a[1].avgCLV).map(([sig, s]) => {
+                    const sc = SGC[sig] || "#cef17b";
+                    const pos = s.avgCLV >= 0;
+                    return (
+                      <div key={sig} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #0a1f18" }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <span style={{ background:sc+"20", color:sc, border:`1px solid ${sc}44`, borderRadius:4, padding:"2px 7px", fontSize:9, fontWeight:700, letterSpacing:1 }}>{sig}</span>
+                          <span style={{ fontSize:9, color:"#3f6b58" }}>{s.n} picks</span>
+                        </div>
+                        <div style={{ textAlign:"right" }}>
+                          <div style={{ fontSize:13, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:pos?"#22ff99":"#ff5544" }}>
+                            {pos?"+":""}{s.avgCLV.toFixed(2)}%
+                          </div>
+                          <div style={{ fontSize:9, color:"#3f6b58" }}>{s.beatPct.toFixed(0)}% beat close</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div style={{ fontSize:9, color:"#2c5443", textAlign:"center", lineHeight:1.8 }}>
+                  Positive CLV = we got a better price than the market closed at.<br/>
+                  Sharp bettors target +CLV over time — it's the leading indicator of long-run profit.
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })()}
 
       {view === "sport" && (
         <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
@@ -383,9 +514,18 @@ export default function App() {
   const [record,   setRecord]   = useState(() => loadRecord());
   const [syncingCLV, setSyncingCLV] = useState(false);
   const [settings, setSettings] = useState(() => loadSettings());
+  const [history,  setHistory]  = useState([]);
   const { bankroll, unitPct } = settings;
 
-  useEffect(() => { load(); autoSettleRecord(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); autoSettleRecord(); fetchHistory(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function fetchHistory() {
+    try {
+      const r = await fetch("/api/history");
+      const h = await r.json();
+      if (Array.isArray(h)) setHistory(h);
+    } catch {}
+  }
 
   // Automatically track every pick the moment it's loaded — no manual "log" needed.
   // Also backfill closingLine onto already-tracked picks once the server has
@@ -630,7 +770,7 @@ export default function App() {
           );
         })}
 
-        {status==="done" && tab==="record"   && <RecordTab record={record} bankroll={bankroll} unitPct={unitPct} onSettle={settle} onDelete={deletePick} onSyncClosingLines={syncClosingLines} syncingCLV={syncingCLV} />}
+        {status==="done" && tab==="record"   && <RecordTab record={record} bankroll={bankroll} unitPct={unitPct} onSettle={settle} onDelete={deletePick} onSyncClosingLines={syncClosingLines} syncingCLV={syncingCLV} history={history} />}
         {                   tab==="settings" && <SettingsPanel bankroll={bankroll} unitPct={unitPct} onSave={saveSettingsHandler} onResetAll={resetAll} />}
 
         {status==="done" && <div style={{ textAlign:"center", fontSize:9, color:"#0f2e22", lineHeight:1.9, marginTop:4 }}>

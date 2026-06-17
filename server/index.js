@@ -19,7 +19,8 @@ const TG_CHAT_ID = process.env.TELEGRAM_CHAT_ID   || "";
 // Set DATA_DIR to a mounted Railway volume (e.g. /data) for picks to
 // survive redeploys. Defaults to a local folder for plain restarts.
 const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, "data");
-const PICKS_FILE = path.join(DATA_DIR, "picks-cache.json");
+const PICKS_FILE   = path.join(DATA_DIR, "picks-cache.json");
+const HISTORY_FILE = path.join(DATA_DIR, "picks-history.json");
 
 app.use(express.json());
 
@@ -180,6 +181,47 @@ function saveCachedPicks(picks) {
   }
 }
 
+function loadHistory() {
+  try { return JSON.parse(fs.readFileSync(HISTORY_FILE, "utf8")); }
+  catch { return []; }
+}
+
+function appendToHistory(picks) {
+  try {
+    const history = loadHistory();
+    if (history.some(h => h.date === picks.date)) return;
+    history.push({
+      date:        picks.date,
+      generatedAt: new Date().toISOString(),
+      bets: (picks.bets || []).map(b => ({
+        sport:        b.sport,
+        matchup:      b.matchup,
+        bet:          b.bet,
+        book:         b.book,
+        odds:         b.odds,
+        ev:           b.ev,
+        signal:       b.signal,
+        commenceTime: b.commenceTime ?? null,
+        closingLine:  b.closingLine  ?? null,
+      })),
+    });
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
+  } catch (e) { console.warn("[history] append failed:", e.message); }
+}
+
+function updateHistoryClosingLine(date, betLabel, closingLine) {
+  try {
+    const history = loadHistory();
+    const day = history.find(h => h.date === date);
+    if (!day) return;
+    const bet = day.bets.find(b => b.bet === betLabel);
+    if (!bet || bet.closingLine !== null) return;
+    bet.closingLine = closingLine;
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
+  } catch (e) { console.warn("[history] update closing line failed:", e.message); }
+}
+
 // ─── DATE HELPER ──────────────────────────────────────────────────────────────
 // US sports books treat the "game day" as the Eastern-time calendar day. Pin
 // the picks-lock boundary to that timezone regardless of where the server
@@ -329,6 +371,7 @@ async function captureClosingLine(bet) {
     if (price === undefined || price === null) return;
     bet.closingLine = price;
     saveCachedPicks(latestPicks);
+    if (latestPicks?.date) updateHistoryClosingLine(latestPicks.date, bet.bet, price);
   } catch (e) {
     console.warn("[clv] capture failed:", e.message);
   }
@@ -418,6 +461,7 @@ app.get("/api/picks", async (req, res) => {
     latestPicks = picks;
     lastAttemptError = null;
     saveCachedPicks(picks);
+    appendToHistory(picks);
     res.json(picks);
   } catch (e) {
     console.error("[picks] Error:", e.message);
@@ -489,6 +533,11 @@ app.get("/api/backtest", async (req, res) => {
     console.error("[backtest] Error:", e.message);
     res.status(500).json({ error: e.message });
   }
+});
+
+// Returns the full picks history (all days with closing lines for CLV analysis).
+app.get("/api/history", (req, res) => {
+  res.json(loadHistory());
 });
 
 // Single historical snapshot probe — fast, just 1 API call (~30 credits).
