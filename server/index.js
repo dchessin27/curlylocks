@@ -6,6 +6,9 @@ const fs      = require("fs");
 const path    = require("path");
 const url     = require("url");
 
+const { computeEdges } = require("./edges");
+const { runBacktest  } = require("./backtest");
+
 const app        = express();
 const ODDS_KEY   = process.env.ODDS_API_KEY  || "";
 const CLAUDE_KEY = process.env.CLAUDE_API_KEY || "";
@@ -23,18 +26,6 @@ app.use(express.json());
 // ─── SERVE REACT BUILD IN PRODUCTION ─────────────────────────────────────────
 const clientBuild = path.join(__dirname, "../client/build");
 app.use(express.static(clientBuild));
-
-// ─── MATH ─────────────────────────────────────────────────────────────────────
-function toDecimal(american) {
-  return american > 0 ? american / 100 + 1 : 100 / Math.abs(american) + 1;
-}
-function noVigProbs(d1, d2) {
-  const p1 = 1 / d1, p2 = 1 / d2, t = p1 + p2;
-  return [p1 / t, p2 / t];
-}
-function calcEV(trueProb, decimalOdds) {
-  return ((trueProb * decimalOdds) - 1) * 100;
-}
 
 // ─── HTTP HELPER ──────────────────────────────────────────────────────────────
 function fetchJson(reqUrl, opts = {}) {
@@ -62,11 +53,11 @@ function fetchJson(reqUrl, opts = {}) {
 }
 
 // ─── FETCH LIVE ODDS ──────────────────────────────────────────────────────────
-// Each sport here costs one Odds API request per picks attempt (free tier =
-// 500/month). Off-season leagues are commented out — re-add them when their
-// seasons start (NBA ~October, NFL/NCAAF ~August, NCAAB ~November).
-// WORLDCUP covers the 2026 FIFA World Cup — remove it once the tournament
-// ends (~July 19). MMA (UFC etc.) runs year-round.
+// Each sport here costs one Odds API request per picks attempt. Off-season
+// leagues are commented out — re-add when their seasons start
+// (NBA ~October, NFL/NCAAF ~August, NCAAB ~November).
+// WORLDCUP covers the 2026 FIFA World Cup — remove after ~July 19.
+// MMA (UFC etc.) runs year-round.
 const SPORTS = {
   MLB:      "baseball_mlb",
   NHL:      "icehockey_nhl",
@@ -74,29 +65,6 @@ const SPORTS = {
   WORLDCUP: "soccer_fifa_world_cup",
   // NBA:   "basketball_nba",
 };
-
-const SHARP_BOOKS = ["pinnacle", "circa_sports"];
-const SOFT_BOOKS  = ["draftkings", "fanduel"];
-
-// Average no-vig probabilities across whichever sharp books posted this
-// market, so one stale/missing sharp line doesn't skew the "true" number.
-function blendedTrueProbs(decA, decB) {
-  const pairs = decA.map((a, i) => noVigProbs(a, decB[i]));
-  const pa = pairs.reduce((s, [x]) => s + x, 0) / pairs.length;
-  const pb = pairs.reduce((s, [, y]) => s + y, 0) / pairs.length;
-  const t = pa + pb;
-  return [pa / t, pb / t];
-}
-
-// True if every individual sharp book's own no-vig probability agrees in
-// direction (positive vs. negative EV) with the blended consensus — i.e.
-// this edge isn't just one stale/outlier sharp line dragging the average.
-// Returns null when there's only one sharp book to check against.
-function sharpAgreement(perBookProbs, sideIdx, price, blendedEv) {
-  if (perBookProbs.length < 2) return null;
-  const blendedPositive = blendedEv > 0;
-  return perBookProbs.every(p => (calcEV(p[sideIdx], toDecimal(price)) > 0) === blendedPositive);
-}
 
 async function fetchTodaysGames() {
   // Compare against the ET "betting day" (matches todayLabel()), not the UTC
@@ -115,128 +83,7 @@ async function fetchTodaysGames() {
 
       const { data } = await fetchJson(apiUrl);
       if (!Array.isArray(data)) continue;
-
-      for (const game of data) {
-        if (game.commence_time.slice(0, 10) !== today) continue;
-
-        // Once a game starts, /odds can return live in-play prices instead of
-        // pregame lines — a team trailing big can show a wildly inflated ML
-        // (e.g. +1400) that looks like a massive "mispricing" vs. a sharp
-        // book's live line but is really just live variance, not a pregame
-        // edge. Skip started games so picks are only built from pregame odds.
-        if (new Date(game.commence_time).getTime() <= Date.now()) continue;
-
-        const h2h = {}, spreads = {}, totals = {};
-        for (const bm of game.bookmakers || []) {
-          for (const m of bm.markets || []) {
-            if (m.key === "h2h") {
-              // Skip 3-way moneylines (soccer's home/draw/away) — the no-vig
-              // math below assumes a binary market, and folding in a draw
-              // would inflate both true-probability numbers.
-              if (m.outcomes.length !== 2) continue;
-              const ho = m.outcomes.find(o => o.name === game.home_team);
-              const ao = m.outcomes.find(o => o.name === game.away_team);
-              if (ho && ao) h2h[bm.key] = { home: ho.price, away: ao.price };
-            } else if (m.key === "spreads") {
-              const ho = m.outcomes.find(o => o.name === game.home_team);
-              const ao = m.outcomes.find(o => o.name === game.away_team);
-              if (ho && ao) spreads[bm.key] = {
-                home: { point: ho.point, price: ho.price },
-                away: { point: ao.point, price: ao.price },
-              };
-            } else if (m.key === "totals") {
-              const over  = m.outcomes.find(o => o.name === "Over");
-              const under = m.outcomes.find(o => o.name === "Under");
-              if (over && under) totals[bm.key] = {
-                over:  { point: over.point,  price: over.price },
-                under: { point: under.point, price: under.price },
-              };
-            }
-          }
-        }
-
-        const sharpsFor = market => SHARP_BOOKS.filter(b => market[b]);
-        const edges = [];
-
-        // ── Moneyline ──
-        let sharps = sharpsFor(h2h);
-        if (sharps.length && (h2h.draftkings || h2h.fanduel)) {
-          const perBook = sharps.map(b => noVigProbs(toDecimal(h2h[b].home), toDecimal(h2h[b].away)));
-          const [tH, tA] = blendedTrueProbs(
-            sharps.map(b => toDecimal(h2h[b].home)),
-            sharps.map(b => toDecimal(h2h[b].away)),
-          );
-          for (const [side, trueProb, idx] of [["home", tH, 0], ["away", tA, 1]]) {
-            let best = null;
-            for (const book of SOFT_BOOKS) {
-              const o = h2h[book]?.[side];
-              if (o === undefined) continue;
-              const ev = calcEV(trueProb, toDecimal(o));
-              if (!best || ev > best.ev) best = { book, price: o, point: null, ev };
-            }
-            if (best) edges.push({ market: "ml", side, sharpSource: sharps.join("+"), consensus: sharpAgreement(perBook, idx, best.price, best.ev), trueProb, ...best });
-          }
-        }
-
-        // ── Spread ──
-        sharps = sharpsFor(spreads);
-        if (sharps.length && (spreads.draftkings || spreads.fanduel)) {
-          const perBook = sharps.map(b => noVigProbs(toDecimal(spreads[b].home.price), toDecimal(spreads[b].away.price)));
-          const [tH, tA] = blendedTrueProbs(
-            sharps.map(b => toDecimal(spreads[b].home.price)),
-            sharps.map(b => toDecimal(spreads[b].away.price)),
-          );
-          for (const [side, trueProb, idx] of [["home", tH, 0], ["away", tA, 1]]) {
-            let best = null;
-            for (const book of SOFT_BOOKS) {
-              const o = spreads[book]?.[side];
-              if (!o) continue;
-              const ev = calcEV(trueProb, toDecimal(o.price));
-              if (!best || ev > best.ev) best = { book, price: o.price, point: o.point, ev };
-            }
-            if (best) edges.push({ market: "spread", side, sharpSource: sharps.join("+"), consensus: sharpAgreement(perBook, idx, best.price, best.ev), trueProb, ...best });
-          }
-        }
-
-        // ── Total ──
-        sharps = sharpsFor(totals);
-        if (sharps.length && (totals.draftkings || totals.fanduel)) {
-          const perBook = sharps.map(b => noVigProbs(toDecimal(totals[b].over.price), toDecimal(totals[b].under.price)));
-          const [tO, tU] = blendedTrueProbs(
-            sharps.map(b => toDecimal(totals[b].over.price)),
-            sharps.map(b => toDecimal(totals[b].under.price)),
-          );
-          for (const [side, trueProb, idx] of [["over", tO, 0], ["under", tU, 1]]) {
-            let best = null;
-            for (const book of SOFT_BOOKS) {
-              const o = totals[book]?.[side];
-              if (!o) continue;
-              const ev = calcEV(trueProb, toDecimal(o.price));
-              if (!best || ev > best.ev) best = { book, price: o.price, point: o.point, ev };
-            }
-            if (best) edges.push({ market: "total", side, sharpSource: sharps.join("+"), consensus: sharpAgreement(perBook, idx, best.price, best.ev), trueProb, ...best });
-          }
-        }
-
-        if (!edges.length) continue;
-
-        // Confluence: moneyline AND spread both show a real edge on the
-        // same team — two independent markets agreeing the soft book is
-        // underpricing them, which is a stronger signal than either alone.
-        const mlEdge     = edges.find(e => e.market === "ml"     && e.ev > 0);
-        const spreadEdge = edges.find(e => e.market === "spread" && e.ev > 0);
-        if (mlEdge && spreadEdge && mlEdge.side === spreadEdge.side) {
-          mlEdge.confluence = spreadEdge.confluence = true;
-        }
-
-        games.push({
-          sport,
-          home: game.home_team,
-          away: game.away_team,
-          time: game.commence_time,
-          edges,
-        });
-      }
+      games.push(...computeEdges(data, sport, { today, nowMs: Date.now() }));
     } catch (e) {
       console.warn(`[odds] ${sport} failed:`, e.message);
     }
@@ -402,22 +249,22 @@ async function generatePicks(games) {
     `Your job is not just to find +EV, it's to pick winners: prefer sides with true probability of roughly 45% or higher when they clear the EV bar. ` +
     `Only take a longshot (true probability well under 40%) if its EV is clearly exceptional (+5%+) and ideally tagged CONSENSUS or CONFLUENCE — don't fill the card with plus-money underdogs just because their EV% looks biggest. ` +
     `A card of modest favorites/near-coinflips that are genuinely +EV and likely to hit beats a card of technically-profitable longshots that lose most of the time.\n` +
-    `Prioritise: a balance of positive EV and true win probability, CONSENSUS and CONFLUENCE tags, playoff/high-stakes spots, RLM signals. Be skeptical of SPLIT edges and of longshots with true probability well under 40%.\n` +
-    `Signal: EV (price value), STEAM (sharp syndicate action), RLM (reverse line movement), ARB (both sides +EV), CONSENSUS (sharp books independently agree), CONFLUENCE (moneyline+spread agree).\n\n` +
+    `Prioritise: a balance of positive EV and true win probability, CONSENSUS and CONFLUENCE tags, playoff/high-stakes spots. Be skeptical of SPLIT edges and of longshots with true probability well under 40%.\n` +
+    `Signal: EV (price value), CONSENSUS (sharp books independently agree), CONFLUENCE (moneyline+spread agree).\n\n` +
     `For each bet set "betType" to "ml", "spread", or "total". Set "side" to "home"/"away" for ml and spread bets, or "over"/"under" for total bets. ` +
     `Set "line" to the spread/total number shown above (e.g. -4.5, 218.5), or null for ml. ` +
     `Set "bet" to a short human label matching the format above, e.g. "Lakers +4.5", "Over 218.5", "Celtics ML".\n\n` +
     `Return ONLY valid JSON, no markdown, no comments. The "bets" array should contain only as many entries (0-3) as genuinely clear the bar — example shows the shape for 3, trim it down if fewer qualify:\n` +
     `{"date":"${today}","bets":[` +
     `{"rank":1,"sport":"NBA","matchup":"Team A @ Team B","betType":"spread","side":"away","line":4.5,"bet":"Team A +4.5","book":"DraftKings","odds":"+105","ev":"+3.2%","confidence":78,"reasoning":"2 sentence sharp reasoning using the real numbers above.","signal":"EV"},` +
-    `{"rank":2,"sport":"MLB","matchup":"Team C @ Team D","betType":"ml","side":"home","line":null,"bet":"Team D ML","book":"FanDuel","odds":"-108","ev":"+2.9%","confidence":77,"reasoning":"Sharp reasoning.","signal":"RLM"},` +
-    `{"rank":3,"sport":"NHL","matchup":"Team E @ Team F","betType":"total","side":"under","line":5.5,"bet":"Under 5.5","book":"DraftKings","odds":"-105","ev":"+3.1%","confidence":74,"reasoning":"Sharp reasoning.","signal":"STEAM"}]}`;
+    `{"rank":2,"sport":"MLB","matchup":"Team C @ Team D","betType":"ml","side":"home","line":null,"bet":"Team D ML","book":"FanDuel","odds":"-108","ev":"+2.9%","confidence":77,"reasoning":"Sharp reasoning.","signal":"CONSENSUS"},` +
+    `{"rank":3,"sport":"NHL","matchup":"Team E @ Team F","betType":"total","side":"under","line":5.5,"bet":"Under 5.5","book":"DraftKings","odds":"-105","ev":"+3.1%","confidence":74,"reasoning":"Sharp reasoning.","signal":"CONFLUENCE"}]}`;
 
   const { data } = await fetchJson("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": CLAUDE_KEY, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
-      model: "claude-sonnet-4-5",
+      model: "claude-sonnet-4-6",
       max_tokens: 1000,
       temperature: 0,
       messages: [{ role: "user", content: prompt }],
@@ -460,8 +307,7 @@ let latestPicks = loadCachedPicks(); // most recently generated picks, with comm
 const alertedBets = new Set();       // keys of bets we've already alerted on, "date|matchup|bet"
 
 // While today's picks haven't been generated yet, avoid re-hitting the Odds
-// API (6 requests, one per sport) on every page load/"try again" click —
-// retry at most once per cooldown window.
+// API on every page load/"try again" click — retry at most once per cooldown window.
 const PICKS_RETRY_COOLDOWN_MS = 10 * 60 * 1000;
 let lastAttemptAt = 0;
 let lastAttemptError = null;
@@ -594,6 +440,31 @@ app.get("/api/results", async (req, res) => {
     const games = await fetchSportScores(sport);
     res.json({ games });
   } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Run a CLV backtest against historical odds. Each run costs 2 snapshots ×
+// 30 credits per sport (h2h+spreads+totals, us region). Default: 14 days
+// ≈ 840 credits. Hard-capped at 30 days (~1,800 credits) per run.
+// Example: /api/backtest?sport=MLB&days=14
+app.get("/api/backtest", async (req, res) => {
+  if (!ODDS_KEY) return res.status(500).json({ error: "ODDS_API_KEY not set." });
+
+  const sport    = (req.query.sport || "").toUpperCase();
+  const sportKey = SPORTS[sport];
+  if (!sportKey) {
+    return res.status(400).json({ error: `Unknown sport. Valid options: ${Object.keys(SPORTS).join(", ")}` });
+  }
+
+  const days = Math.min(Math.max(parseInt(req.query.days || "14") || 14, 1), 30);
+  console.log(`[backtest] ${sport} × ${days} days (~${days * 2 * 30} credits)`);
+
+  try {
+    const report = await runBacktest({ oddsKey: ODDS_KEY, sportKey, sport, days });
+    res.json(report);
+  } catch (e) {
+    console.error("[backtest] Error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
