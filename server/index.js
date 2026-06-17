@@ -356,13 +356,35 @@ setInterval(() => {
 }, 60 * 1000);
 
 // ─── ROUTES ───────────────────────────────────────────────────────────────────
-app.get("/health", (req, res) => {
-  res.json({
+app.get("/health", async (req, res) => {
+  const result = {
     status: "ok",
     oddsKey: !!ODDS_KEY,
     claudeKey: !!CLAUDE_KEY,
     time: new Date().toISOString(),
-  });
+  };
+
+  // When ?verify=1, make a live call to the Odds API sports list to confirm
+  // the key is valid and show the plan's remaining credits.
+  if (req.query.verify === "1" && ODDS_KEY) {
+    try {
+      const { data, status } = await fetchJson(
+        `https://api.the-odds-api.com/v4/sports/?apiKey=${ODDS_KEY}`
+      );
+      if (Array.isArray(data)) {
+        result.oddsKeyValid = true;
+        result.oddsApiSportsCount = data.length;
+      } else {
+        result.oddsKeyValid = false;
+        result.oddsApiError = data;
+      }
+    } catch (e) {
+      result.oddsKeyValid = false;
+      result.oddsApiError = e.message;
+    }
+  }
+
+  res.json(result);
 });
 
 app.get("/api/picks", async (req, res) => {
