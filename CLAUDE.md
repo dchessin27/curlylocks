@@ -7,17 +7,21 @@ Daily sharp sports betting picks using real odds from The Odds API + Claude AI a
 ```
 curly-locks/
 ├── server/
-│   └── index.js        # Express server — fetches real odds, calls Claude, serves picks
+│   ├── index.js         # Express server — routes, picks cache, alerts, line poller
+│   ├── edges.js         # EV engine — vig stripping, true prob, CONSENSUS/CONFLUENCE tags
+│   ├── lines.js         # Liability tracker — REVERSE_LINE, FROZEN_LINE, SHARP_SOFT_GAP
+│   └── backtest.js      # CLV backtest against historical snapshots
 ├── client/
 │   ├── src/
-│   │   ├── App.js      # Full React app — bets, record tracker, settings
-│   │   └── index.js    # Entry point
+│   │   ├── App.js       # Full React app — bets, record tracker, CLV, settings
+│   │   └── index.js     # Entry point
 │   ├── public/
 │   │   └── index.html
 │   └── package.json
-├── package.json         # Root — runs server, builds client
-├── railway.json         # Deploy config
-└── .env.example        # API key template
+├── PICKS_METHODOLOGY.md  # Full picks pipeline documentation — read before editing picks logic
+├── package.json          # Root — runs server, builds client
+├── railway.json          # Deploy config
+└── .env.example          # API key template
 ```
 
 ## Local Development
@@ -53,11 +57,14 @@ npm start
 
 ## How the picks work
 
-1. `server/index.js` calls The Odds API for NBA/MLB/NHL/NFL games today
-2. For each game it calculates true no-vig probability using Pinnacle (sharpest book)
-3. Compares DraftKings/FanDuel prices to find genuine +EV
-4. Sends the real odds data to Claude to pick the 3 best bets
-5. Claude returns picks with real odds numbers (not estimates)
+Full methodology: see `PICKS_METHODOLOGY.md` in the project root — read this before making any changes to the picks pipeline.
+
+Short version:
+1. `server/index.js` calls The Odds API for today's MLB/NHL/MMA/WORLDCUP games
+2. `server/edges.js` strips vig from Pinnacle+Circa to find true probability, computes EV% vs DraftKings/FanDuel
+3. `server/lines.js` compares current Pinnacle lines to opening lines → REVERSE_LINE, FROZEN_LINE, SHARP_SOFT_GAP signals
+4. Today's handicapper reference picks (from Settings) are injected as context
+5. Claude (claude-sonnet-4-6) selects 0–3 bets from the pre-computed EV data — it never invents odds
 
 ## Key files to edit
 
