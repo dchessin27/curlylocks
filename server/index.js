@@ -628,6 +628,32 @@ app.get("*", (req, res) => {
   }
 });
 
+// ─── BACKGROUND LINE POLLER ───────────────────────────────────────────────────
+// Polls every sport every 2 hours — h2h + spreads only (lighter call) — purely
+// to keep line-history.json current so reverse/frozen/gap signals have a full
+// day of movement history by the time picks are generated.
+// Cost: ~2 markets × N sports = ~8 credits/poll, ~2,880 credits/month.
+async function pollAllLines() {
+  if (!ODDS_KEY) return;
+  const rawAll = [];
+  for (const [sport, key] of Object.entries(SPORTS)) {
+    try {
+      const { data } = await fetchJson(
+        `https://api.the-odds-api.com/v4/sports/${key}/odds/` +
+        `?apiKey=${ODDS_KEY}&regions=us&markets=h2h,spreads` +
+        `&bookmakers=pinnacle,draftkings,fanduel&oddsFormat=american&dateFormat=iso`
+      );
+      if (Array.isArray(data)) rawAll.push(...data);
+    } catch (e) {
+      console.warn(`[lines] poll ${sport} failed:`, e.message);
+    }
+  }
+  if (rawAll.length) {
+    computeLiability(LINES_FILE, rawAll);
+    console.log(`[lines] polled ${rawAll.length} games across ${Object.keys(SPORTS).length} sports`);
+  }
+}
+
 app.listen(PORT, () => {
   console.log("\n╔══════════════════════════════════════════╗");
   console.log("║      🔒  CURLY LOCKS                     ║");
@@ -636,4 +662,8 @@ app.listen(PORT, () => {
   console.log(`║  Odds API : ${ODDS_KEY   ? "✓ connected" : "✗ missing (add to .env)"}          ║`);
   console.log(`║  Claude   : ${CLAUDE_KEY ? "✓ connected" : "✗ missing (add to .env)"}          ║`);
   console.log("╚══════════════════════════════════════════╝\n");
+
+  // Warm up line history immediately, then refresh every 2 hours.
+  pollAllLines();
+  setInterval(pollAllLines, 2 * 60 * 60 * 1000);
 });
