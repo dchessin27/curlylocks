@@ -3,11 +3,14 @@ import React, { useState, useEffect } from "react";
 // ─── STORAGE ─────────────────────────────────────────────────────────────────
 const RECORD_KEY   = "cl_record_v3";
 const SETTINGS_KEY = "cl_settings_v1";
+const HANDI_KEY    = "cl_handi_v1";
 
-const loadRecord   = () => { try { return JSON.parse(localStorage.getItem(RECORD_KEY)   || "[]");                       } catch { return []; } };
-const saveRecord   = r  => localStorage.setItem(RECORD_KEY,   JSON.stringify(r));
-const loadSettings = () => { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{"bankroll":10000,"unitPct":1}'); } catch { return { bankroll: 10000, unitPct: 1 }; } };
-const saveSettings = s  => localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+const loadRecord       = () => { try { return JSON.parse(localStorage.getItem(RECORD_KEY)   || "[]");  } catch { return []; } };
+const saveRecord       = r  => localStorage.setItem(RECORD_KEY,   JSON.stringify(r));
+const loadSettings     = () => { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{"bankroll":10000,"unitPct":1,"handiName":"Handicapper"}'); } catch { return { bankroll: 10000, unitPct: 1, handiName: "Handicapper" }; } };
+const saveSettings     = s  => localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+const loadHandiRecord  = () => { try { return JSON.parse(localStorage.getItem(HANDI_KEY)    || "[]");  } catch { return []; } };
+const saveHandiRecord  = r  => localStorage.setItem(HANDI_KEY, JSON.stringify(r));
 
 // ─── MATH ─────────────────────────────────────────────────────────────────────
 const parseOdds = v => { const n = parseInt(String(v).replace(/[−–—]/g, "-").replace(/[^0-9\-+]/g, ""), 10); return isNaN(n) ? 0 : n; };
@@ -431,17 +434,209 @@ function RecordTab({ record, bankroll, unitPct, onSettle, onDelete, onSyncClosin
   );
 }
 
+// ─── HANDICAPPER TAB ──────────────────────────────────────────────────────────
+function AddPickForm({ onAdd, onCancel, defaultDate }) {
+  const [sport, setSport] = useState("MLB");
+  const [bet,   setBet]   = useState("");
+  const [odds,  setOdds]  = useState("");
+  const [book,  setBook]  = useState("");
+  const [notes, setNotes] = useState("");
+
+  function submit() {
+    const o = parseOdds(odds);
+    if (!bet.trim() || !o) return;
+    onAdd({ id: Date.now() + Math.random(), date: defaultDate, sport, bet: bet.trim(), book: book.trim() || null, odds: o, notes: notes.trim(), result: "pending", closingLine: null });
+    setBet(""); setOdds(""); setBook(""); setNotes(""); onCancel();
+  }
+
+  const fieldStyle = { width:"100%", background:"#071210", border:"1px solid #194232", borderRadius:6, color:"#cdedb3", padding:"9px 12px", fontSize:13, fontFamily:"'DM Mono',monospace", outline:"none" };
+
+  return (
+    <div style={{ background:"#08140f", border:"1px solid #cef17b33", borderRadius:10, padding:16 }}>
+      <div style={{ fontSize:10, color:"#cef17b", letterSpacing:1, marginBottom:12 }}>LOG PICK</div>
+      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+        <div style={{ display:"flex", gap:8 }}>
+          <select value={sport} onChange={e => setSport(e.target.value)} style={{ ...fieldStyle, flex:"0 0 86px", cursor:"pointer" }}>
+            {Object.keys(SC).map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <input value={bet} onChange={e => setBet(e.target.value)} placeholder="Bet — Chiefs -7, Over 51.5, Patriots ML" style={{ ...fieldStyle, flex:1 }} />
+        </div>
+        <div style={{ display:"flex", gap:8 }}>
+          <input value={odds} onChange={e => setOdds(e.target.value)} placeholder="Odds (-110, +185)" style={{ ...fieldStyle, flex:1 }} />
+          <input value={book} onChange={e => setBook(e.target.value)} placeholder="Book (optional)" style={{ ...fieldStyle, flex:1 }} />
+        </div>
+        <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Handicapper's reasoning (optional)" rows={2} style={{ ...fieldStyle, color:"#7a9488", resize:"vertical" }} />
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={submit} disabled={!bet.trim() || !parseOdds(odds)} style={{ flex:1, background:"#cef17b", color:"#050d0a", border:"none", borderRadius:7, padding:"10px 0", fontSize:11, fontWeight:700, letterSpacing:1, cursor:"pointer", fontFamily:"'DM Mono',monospace", opacity:(!bet.trim()||!parseOdds(odds))?0.4:1 }}>+ ADD PICK</button>
+          <button onClick={onCancel} style={{ background:"none", border:"1px solid #194232", color:"#3f6b58", borderRadius:7, padding:"10px 16px", fontSize:11, cursor:"pointer", fontFamily:"'DM Mono',monospace" }}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HandicapperTab({ record, onAdd, onSettle, onDelete, bankroll, unitPct, currentDate, handiName }) {
+  const [view,     setView]     = useState("today");
+  const [showForm, setShowForm] = useState(false);
+
+  const today    = record.filter(p => p.date === currentDate);
+  const settled  = [...record].filter(p => p.result !== "pending").reverse();
+  const overall  = calcStats(record);
+  const rc       = !overall || overall.roi === null ? "#cef17b" : parseFloat(overall.roi) >= 0 ? "#22ff99" : "#ff5544";
+  const clvStats = calcCLVStats(record);
+  const clvc     = clvStats && parseFloat(clvStats.avgCLV) >= 0 ? "#22ff99" : "#ff5544";
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:17, fontWeight:800, color:"#cdedb3", letterSpacing:1 }}>👤 {(handiName||"HANDICAPPER").toUpperCase()}</div>
+        <button onClick={() => setShowForm(v => !v)} style={{ background:showForm?"none":"#cef17b", color:showForm?"#3f6b58":"#050d0a", border:"1px solid #cef17b44", borderRadius:6, padding:"5px 12px", fontSize:9, cursor:"pointer", letterSpacing:1, fontFamily:"'DM Mono',monospace" }}>
+          {showForm ? "✕ CANCEL" : "+ LOG PICK"}
+        </button>
+      </div>
+
+      {showForm && <AddPickForm onAdd={p => { onAdd(p); setShowForm(false); }} onCancel={() => setShowForm(false)} defaultDate={currentDate} />}
+
+      <div style={{ display:"flex", background:"#071210", border:"1px solid #0f2e22", borderRadius:8, padding:3 }}>
+        {[["today","📋 Today"],["stats","📊 Stats"],["history","📜 History"]].map(([k,l]) => (
+          <button key={k} onClick={() => setView(k)} style={{ ...btn(view===k), padding:"5px 0", fontSize:9 }}>{l}</button>
+        ))}
+      </div>
+
+      {view === "today" && (
+        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+          {today.length === 0 && !showForm && (
+            <div style={{ textAlign:"center", padding:"50px 0", color:"#2c5443", fontSize:10, lineHeight:2 }}>
+              No picks logged today.<br/>Tap + LOG PICK to add {handiName || "the handicapper"}'s plays.
+            </div>
+          )}
+          {today.map(p => {
+            const sc = SC[p.sport] || "#cef17b";
+            const isWin = p.result==="win", isLoss = p.result==="loss";
+            return (
+              <div key={p.id} style={{ background:"#08140f", border:`1px solid ${isWin?"#22ff9933":isLoss?"#ff554433":"#0f2e22"}`, borderLeft:`3px solid ${isWin?"#22ff99":isLoss?"#ff5544":sc}`, borderRadius:8, padding:"12px 14px" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10 }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3 }}>
+                      <span>{SI[p.sport]||"🎯"}</span>
+                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:16, fontWeight:700, color:"#cdedb3" }}>{p.bet}</span>
+                    </div>
+                    <div style={{ fontSize:9, color:"#3f6b58" }}>{fmtOdds(p.odds)}{p.book ? ` · ${p.book}` : ""} · {p.sport}</div>
+                    {p.notes && <div style={{ fontSize:10, color:"#7a9488", marginTop:7, lineHeight:1.7, fontStyle:"italic" }}>"{p.notes}"</div>}
+                    <div style={{ marginTop:6 }}><CLVBadge pick={p} /></div>
+                  </div>
+                  <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:5, flexShrink:0 }}>
+                    {p.result !== "pending" && (
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:16, fontWeight:700, color:isWin?"#22ff99":isLoss?"#ff5544":"#7a9488" }}>
+                        {fmtDollars(unitsToDollars(pickPL(p), bankroll, unitPct))}
+                      </div>
+                    )}
+                    <div style={{ display:"flex", gap:4 }}>
+                      {p.result === "pending"
+                        ? ["win","loss","push"].map(r => (
+                          <button key={r} onClick={() => onSettle(p.id, r)} style={{ background:r==="win"?"#22ff9920":r==="loss"?"#ff554420":"#3a4f4420", border:`1px solid ${r==="win"?"#22ff9944":r==="loss"?"#ff554444":"#3a4f4444"}`, color:r==="win"?"#22ff99":r==="loss"?"#ff5544":"#7a9488", borderRadius:3, padding:"4px 8px", cursor:"pointer", fontSize:9 }}>
+                            {r.toUpperCase()}
+                          </button>
+                        ))
+                        : <button onClick={() => onSettle(p.id,"pending")} style={{ background:"#cef17b14",border:"1px solid #cef17b33",color:"#cef17b",borderRadius:3,padding:"4px 8px",cursor:"pointer",fontSize:10 }}>↩</button>
+                      }
+                      <button onClick={() => onDelete(p.id)} style={{ background:"none",border:"1px solid #2a1a1a",color:"#553333",borderRadius:3,padding:"4px 7px",cursor:"pointer",fontSize:10 }}>✕</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {view === "stats" && (
+        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          {!overall || overall.total === 0 ? (
+            <div style={{ textAlign:"center", padding:"50px 0", color:"#2c5443", fontSize:10 }}>No picks logged yet.</div>
+          ) : (
+            <>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                <div style={{ background:"#08140f", border:"1px solid #0f2e22", borderRadius:8, padding:"14px 16px" }}>
+                  <div style={{ fontSize:9, color:"#3f6b58", letterSpacing:1, marginBottom:6 }}>RECORD</div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:30, fontWeight:800, color:"#cdedb3" }}>
+                    {overall.wins}<span style={{ color:"#2c5443", fontSize:20 }}>-</span>{overall.losses}
+                    {overall.pushes > 0 && <span style={{ color:"#3f6b58", fontSize:16 }}>-{overall.pushes}</span>}
+                  </div>
+                  <div style={{ fontSize:9, color:"#3f6b58", marginTop:3 }}>{overall.total} picks total</div>
+                </div>
+                <div style={{ background:"#08140f", border:`1px solid ${rc}33`, borderRadius:8, padding:"14px 16px" }}>
+                  <div style={{ fontSize:9, color:"#3f6b58", letterSpacing:1, marginBottom:6 }}>ROI</div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:30, fontWeight:800, color:rc }}>
+                    {overall.roi !== null ? (parseFloat(overall.roi)>=0?"+":"")+overall.roi+"%" : "—"}
+                  </div>
+                  <div style={{ fontSize:9, color:"#3f6b58", marginTop:3 }}>{overall.hitRate ? overall.hitRate+"% hit rate" : "pending"}</div>
+                </div>
+              </div>
+              {clvStats && (
+                <div style={{ background:"#08140f", border:`1px solid ${clvc}33`, borderRadius:8, padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div>
+                    <div style={{ fontSize:9, color:"#3f6b58", letterSpacing:1, marginBottom:4 }}>AVG CLV</div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:24, fontWeight:800, color:clvc }}>{parseFloat(clvStats.avgCLV)>=0?"+":""}{clvStats.avgCLV}%</div>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ fontSize:9, color:"#3f6b58", marginBottom:4 }}>BEAT CLOSE</div>
+                    <div style={{ fontSize:14, fontWeight:700, color:clvc }}>{clvStats.beatPct}%</div>
+                    <div style={{ fontSize:8, color:"#2c5443", marginTop:2 }}>{clvStats.count} picks</div>
+                  </div>
+                </div>
+              )}
+              {Object.entries(groupBy(record.filter(p => p.result !== "pending"), "sport")).map(([sp, picks]) => (
+                <ScoreRow key={sp} label={`${SI[sp]||"🎯"} ${sp}`} picks={picks} color={SC[sp]||"#cef17b"} bankroll={bankroll} unitPct={unitPct} />
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
+      {view === "history" && (
+        <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+          {settled.length === 0 && <div style={{ textAlign:"center", padding:"40px 0", color:"#2c5443", fontSize:10 }}>No settled picks yet.</div>}
+          {settled.map(p => {
+            const isWin = p.result==="win", isLoss = p.result==="loss";
+            const pl = pickPL(p);
+            return (
+              <div key={p.id} style={{ background:"#08140f", border:`1px solid ${isWin?"#22ff9933":isLoss?"#ff554433":"#0f2e22"}`, borderLeft:`3px solid ${isWin?"#22ff99":isLoss?"#ff5544":"#3f6b58"}`, borderRadius:7, padding:"10px 13px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:14, fontWeight:700, color:isWin?"#22ff99":isLoss?"#ff7766":"#7a9488" }}>{p.bet}</div>
+                  <div style={{ fontSize:9, color:"#3f6b58", marginTop:2 }}>{SI[p.sport]||"🎯"} {p.sport} · {fmtOdds(p.odds)}{p.book?` · ${p.book}`:""} · {p.date}</div>
+                  {p.notes && <div style={{ fontSize:9, color:"#3f6b58", marginTop:3, fontStyle:"italic" }}>"{p.notes.slice(0,80)}{p.notes.length>80?"...":""}"</div>}
+                  <div style={{ marginTop:5 }}><CLVBadge pick={p} /></div>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0, marginLeft:10 }}>
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:16, fontWeight:700, color:isWin?"#22ff99":isLoss?"#ff5544":"#7a9488" }}>{fmtDollars(unitsToDollars(pl, bankroll, unitPct))}</div>
+                    <div style={{ fontSize:8, color:"#2c5443", marginTop:1 }}>{isWin?"+":isLoss?"-":""}{Math.abs(pl).toFixed(0)}u</div>
+                  </div>
+                  <button onClick={() => onSettle(p.id,"pending")} style={{ background:"#cef17b14",border:"1px solid #cef17b33",color:"#cef17b",borderRadius:3,padding:"3px 7px",cursor:"pointer",fontSize:10 }}>↩</button>
+                  <button onClick={() => onDelete(p.id)} style={{ background:"none",border:"1px solid #2a1a1a",color:"#553333",borderRadius:3,padding:"3px 7px",cursor:"pointer",fontSize:10 }}>✕</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── SETTINGS ─────────────────────────────────────────────────────────────────
-function SettingsPanel({ bankroll, unitPct, onSave, onResetAll }) {
-  const [br, setBr]   = useState(String(bankroll));
-  const [up, setUp]   = useState(String(unitPct));
+function SettingsPanel({ bankroll, unitPct, handiName, onSave, onResetAll }) {
+  const [br,   setBr]   = useState(String(bankroll));
+  const [up,   setUp]   = useState(String(unitPct));
+  const [hn,   setHn]   = useState(handiName || "Handicapper");
   const [saved, setSaved] = useState(false);
   const brV = parseFloat(br) || bankroll;
   const upV = parseFloat(up) || unitPct;
   const unitAmt = brV * upV / 100;
 
   function handleSave() {
-    if (parseFloat(br) > 0 && parseFloat(up) > 0) onSave(parseFloat(br), parseFloat(up));
+    if (parseFloat(br) > 0 && parseFloat(up) > 0) onSave(parseFloat(br), parseFloat(up), hn.trim() || "Handicapper");
     setSaved(true); setTimeout(() => setSaved(false), 2000);
   }
 
@@ -492,6 +687,12 @@ function SettingsPanel({ bankroll, unitPct, onSave, onResetAll }) {
         </div>
       </div>
 
+      <div style={{ background:"#08140f", border:"1px solid #0f2e22", borderRadius:10, padding:"16px 18px" }}>
+        <div style={{ fontSize:9, color:"#cef17b", letterSpacing:1, marginBottom:12 }}>HANDICAPPER NAME</div>
+        <input type="text" value={hn} onChange={e => setHn(e.target.value)} placeholder="e.g. Sharp Sal, The Greek..." style={{ width:"100%", background:"#071210", border:"1px solid #194232", borderRadius:6, color:"#cdedb3", padding:"10px 14px", fontSize:15, fontFamily:"'DM Mono',monospace", outline:"none" }} />
+        <div style={{ fontSize:9, color:"#2c5443", marginTop:8 }}>Shown as the label on the CAPPER tab</div>
+      </div>
+
       <button onClick={handleSave} style={{ width:"100%", background:saved?"#22ff9922":"#cef17b", color:saved?"#22ff99":"#050d0a", border:`1px solid ${saved?"#22ff9955":"transparent"}`, borderRadius:8, padding:"14px 0", fontSize:12, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, letterSpacing:1, cursor:"pointer" }}>{saved ? "✓ SAVED" : "SAVE SETTINGS"}</button>
       <div style={{ fontSize:9, color:"#0f2e22", textAlign:"center", lineHeight:1.8 }}>Settings saved locally · Sharp sizing = 1-2% per bet<br/>Not financial advice · Bet responsibly</div>
 
@@ -512,10 +713,11 @@ export default function App() {
   const [data,     setData]     = useState(null);
   const [error,    setError]    = useState(null);
   const [record,   setRecord]   = useState(() => loadRecord());
-  const [syncingCLV, setSyncingCLV] = useState(false);
-  const [settings, setSettings] = useState(() => loadSettings());
-  const [history,  setHistory]  = useState([]);
-  const { bankroll, unitPct } = settings;
+  const [syncingCLV,   setSyncingCLV]   = useState(false);
+  const [settings,     setSettings]     = useState(() => loadSettings());
+  const [history,      setHistory]      = useState([]);
+  const [handiRecord,  setHandiRecord]  = useState(() => loadHandiRecord());
+  const { bankroll, unitPct, handiName = "Handicapper" } = settings;
 
   useEffect(() => { load(); autoSettleRecord(); fetchHistory(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -578,6 +780,10 @@ export default function App() {
 
   function settle(id, result)  { const u = record.map(p => p.id===id ? {...p,result} : p); setRecord(u); saveRecord(u); }
   function deletePick(id)      { const u = record.filter(p => p.id!==id); setRecord(u); saveRecord(u); }
+
+  function handiAdd(pick)           { const u = [pick, ...handiRecord]; setHandiRecord(u); saveHandiRecord(u); }
+  function handiSettle(id, result)  { const u = handiRecord.map(p => p.id===id ? {...p,result} : p); setHandiRecord(u); saveHandiRecord(u); }
+  function handiDelete(id)          { const u = handiRecord.filter(p => p.id!==id); setHandiRecord(u); saveHandiRecord(u); }
 
   function gradeBet(p, game) {
     const betType = p.betType || "ml";
@@ -661,9 +867,10 @@ export default function App() {
     }
     setSyncingCLV(false);
   }
-  function saveSettingsHandler(br, up) { const s={bankroll:br,unitPct:up}; setSettings(s); saveSettings(s); }
+  function saveSettingsHandler(br, up, hn) { const s={bankroll:br,unitPct:up,handiName:hn}; setSettings(s); saveSettings(s); }
 
-  const pendingCount = record.filter(p => p.result==="pending").length;
+  const pendingCount      = record.filter(p => p.result==="pending").length;
+  const handiPendingCount = handiRecord.filter(p => p.result==="pending").length;
   const overall = calcStats(record);
 
   return (
@@ -693,7 +900,10 @@ export default function App() {
           <button onClick={() => setTab("record")}   style={{ ...btn(tab==="record"), position:"relative" }}>
             📊 SCORE {pendingCount>0 && <span style={{ position:"absolute", top:4, right:6, background:"#ff8866", color:"#050d0a", borderRadius:10, fontSize:8, padding:"1px 5px", fontWeight:700 }}>{pendingCount}</span>}
           </button>
-          <button onClick={() => setTab("settings")} style={btn(tab==="settings")}>⚙️ SETTINGS</button>
+          <button onClick={() => setTab("capper")}   style={{ ...btn(tab==="capper"), position:"relative" }}>
+            👤 CAPPER {handiPendingCount>0 && <span style={{ position:"absolute", top:4, right:6, background:"#4a9fff", color:"#050d0a", borderRadius:10, fontSize:8, padding:"1px 5px", fontWeight:700 }}>{handiPendingCount}</span>}
+          </button>
+          <button onClick={() => setTab("settings")} style={btn(tab==="settings")}>⚙️</button>
         </div>
         {data && tab==="bets" && <div style={{ fontSize:9, color:"#2c5443", marginTop:8 }}>{data.date}</div>}
       </div>
@@ -780,7 +990,8 @@ export default function App() {
         })}
 
         {status==="done" && tab==="record"   && <RecordTab record={record} bankroll={bankroll} unitPct={unitPct} onSettle={settle} onDelete={deletePick} onSyncClosingLines={syncClosingLines} syncingCLV={syncingCLV} history={history} />}
-        {                   tab==="settings" && <SettingsPanel bankroll={bankroll} unitPct={unitPct} onSave={saveSettingsHandler} onResetAll={resetAll} />}
+        {                   tab==="capper"   && <HandicapperTab record={handiRecord} onAdd={handiAdd} onSettle={handiSettle} onDelete={handiDelete} bankroll={bankroll} unitPct={unitPct} currentDate={data?.date || new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric",timeZone:"America/New_York"})} handiName={handiName} />}
+        {                   tab==="settings" && <SettingsPanel bankroll={bankroll} unitPct={unitPct} handiName={handiName} onSave={saveSettingsHandler} onResetAll={resetAll} />}
 
         {status==="done" && <div style={{ textAlign:"center", fontSize:9, color:"#0f2e22", lineHeight:1.9, marginTop:4 }}>
           Curly Locks · Real odds via The Odds API · EV vs Pinnacle no-vig · Claude AI<br/>Not financial advice · Bet responsibly
