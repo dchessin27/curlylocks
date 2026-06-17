@@ -56,7 +56,7 @@ function calcCLVStats(picks) {
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const SC  = { NFL:"#cef17b", NBA:"#e85d3a", MLB:"#4aade8", NHL:"#7ecfcf", MMA:"#ff5e62", WORLDCUP:"#e8c84a" };
 const SI  = { NFL:"🏈", NBA:"🏀", MLB:"⚾", NHL:"🏒", MMA:"🥊", WORLDCUP:"⚽" };
-const SGC = { EV:"#cef17b", CONSENSUS:"#22ff99", CONFLUENCE:"#4a9fff" };
+const SGC = { EV:"#cef17b", CONSENSUS:"#22ff99", CONFLUENCE:"#4a9fff", LIABILITY:"#ff8c00" };
 const SLOT_SYMBOLS = ["🔒","7️⃣","🍒","💰","⭐","🍀"];
 const RM  = [
   { label:"LOCK #1", emoji:"🥇", border:"#cef17b", glow:"#cef17b33" },
@@ -765,6 +765,15 @@ export default function App() {
                 </div>
               </div>
               <div style={{ height:3, background:"#0f2e22", borderRadius:2, overflow:"hidden", marginBottom:10 }}><div style={{ height:"100%", width:conf+"%", background:`linear-gradient(90deg,${rm.border},${rm.border}66)`, borderRadius:2 }} /></div>
+              {bet.liability && (
+                <div style={{ background:"#ff8c0018", border:"1px solid #ff8c0055", borderRadius:6, padding:"7px 12px", marginBottom:10, display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:14 }}>🎯</span>
+                  <div>
+                    <div style={{ fontSize:10, fontWeight:700, color:"#ff8c00", letterSpacing:1 }}>OFFICIAL PLAY</div>
+                    <div style={{ fontSize:9, color:"#a05a00", marginTop:1 }}>Reverse line + frozen line confirm books need the other side</div>
+                  </div>
+                </div>
+              )}
               <div style={{ fontSize:11, color:"#7a9488", lineHeight:1.8 }}>{bet.reasoning}</div>
             </div>
           );

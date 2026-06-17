@@ -6,8 +6,9 @@ const fs      = require("fs");
 const path    = require("path");
 const url     = require("url");
 
-const { computeEdges } = require("./edges");
-const { runBacktest  } = require("./backtest");
+const { computeEdges }                = require("./edges");
+const { runBacktest  }                = require("./backtest");
+const { computeLiability, liabilityStr } = require("./lines");
 
 const app        = express();
 const ODDS_KEY   = process.env.ODDS_API_KEY  || "";
@@ -21,6 +22,7 @@ const TG_CHAT_ID = process.env.TELEGRAM_CHAT_ID   || "";
 const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, "data");
 const PICKS_FILE   = path.join(DATA_DIR, "picks-cache.json");
 const HISTORY_FILE = path.join(DATA_DIR, "picks-history.json");
+const LINES_FILE   = path.join(DATA_DIR, "line-history.json");
 
 app.use(express.json());
 
@@ -71,8 +73,9 @@ async function fetchTodaysGames() {
   // Compare against the ET "betting day" (matches todayLabel()), not the UTC
   // date — otherwise evening US games (8pm ET+ = already the next UTC day)
   // get excluded from "today's" pool entirely.
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-  const games = [];
+  const today   = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const games   = [];
+  const rawAll  = []; // collect raw API data for liability computation
 
   for (const [sport, key] of Object.entries(SPORTS)) {
     try {
@@ -84,11 +87,21 @@ async function fetchTodaysGames() {
 
       const { data } = await fetchJson(apiUrl);
       if (!Array.isArray(data)) continue;
+      rawAll.push(...data);
       games.push(...computeEdges(data, sport, { today, nowMs: Date.now() }));
     } catch (e) {
       console.warn(`[odds] ${sport} failed:`, e.message);
     }
   }
+
+  // Compute line-movement / liability signals for today's games only.
+  const todayRaw    = rawAll.filter(g => g.commence_time.slice(0, 10) === today);
+  const liabilityMap = computeLiability(LINES_FILE, todayRaw);
+  for (const g of games) {
+    const sigs = liabilityMap[g.id];
+    if (sigs && sigs.length) g.liability = sigs;
+  }
+
   return games;
 }
 
@@ -267,7 +280,8 @@ async function generatePicks(games) {
         return `${betLabel(g, e)} ${e.price > 0 ? "+" : ""}${e.price} (${e.book}, true ${(e.trueProb * 100).toFixed(0)}%, EV ${e.ev >= 0 ? "+" : ""}${e.ev.toFixed(1)}%, vs ${e.sharpSource}${tagStr})`;
       })
       .join(" | ");
-    return `${g.sport}: ${g.away} @ ${g.home} (${t}) — ${edgeLines}`;
+    const liab = liabilityStr(g.liability);
+    return `${g.sport}: ${g.away} @ ${g.home} (${t}) — ${liab}${edgeLines}`;
   }).join("\n");
 
   const prompt =
@@ -293,14 +307,27 @@ async function generatePicks(games) {
     `A card of modest favorites/near-coinflips that are genuinely +EV and likely to hit beats a card of technically-profitable longshots that lose most of the time.\n` +
     `Prioritise: a balance of positive EV and true win probability, CONSENSUS and CONFLUENCE tags, playoff/high-stakes spots. Be skeptical of SPLIT edges and of longshots with true probability well under 40%.\n` +
     `Signal: EV (price value), CONSENSUS (sharp books independently agree), CONFLUENCE (moneyline+spread agree).\n\n` +
+    `Some games show a [LIABILITY: ...] prefix with one or more of these signals computed directly from line-movement data:\n` +
+    `REVERSE LINE — the spread moved toward the underdog since opening despite public money piling on the favourite. ` +
+    `This is the classic sharp-money tell: the book is adjusting to liability, not public action. ` +
+    `"Where's the liability? Who do the books need?" — when the line goes the wrong way, the answer is clear.\n` +
+    `FROZEN LINE — the game is within 5 hours and Pinnacle has not moved the line at all. ` +
+    `The book is standing firm. They like their side and don't need to hedge.\n` +
+    `SHARP/SOFT GAP — Pinnacle and DraftKings/FanDuel have different spread numbers. ` +
+    `The sharp book has already moved; the public book hasn't caught up. ` +
+    `The side with the better number at the soft book is getting a gift — bet them there.\n` +
+    `When REVERSE LINE + FROZEN LINE + SHARP/SOFT GAP all appear on the same game, that is the highest-confidence scenario — ` +
+    `the books need the underdog, sharp money is confirming it, and the public book is still offering the wrong number. ` +
+    `Set liability: true for those picks. A liability spot should rank ahead of a plain +EV pick of similar size.\n\n` +
     `For each bet set "betType" to "ml", "spread", or "total". Set "side" to "home"/"away" for ml and spread bets, or "over"/"under" for total bets. ` +
     `Set "line" to the spread/total number shown above (e.g. -4.5, 218.5), or null for ml. ` +
-    `Set "bet" to a short human label matching the format above, e.g. "Lakers +4.5", "Over 218.5", "Celtics ML".\n\n` +
+    `Set "bet" to a short human label matching the format above, e.g. "Lakers +4.5", "Over 218.5", "Celtics ML".\n` +
+    `Set "liability" to true only when the game shows REVERSE LINE and/or FROZEN LINE signals — otherwise false.\n\n` +
     `Return ONLY valid JSON, no markdown, no comments. The "bets" array should contain only as many entries (0-3) as genuinely clear the bar — example shows the shape for 3, trim it down if fewer qualify:\n` +
     `{"date":"${today}","bets":[` +
-    `{"rank":1,"sport":"NBA","matchup":"Team A @ Team B","betType":"spread","side":"away","line":4.5,"bet":"Team A +4.5","book":"DraftKings","odds":"+105","ev":"+3.2%","confidence":78,"reasoning":"2 sentence sharp reasoning using the real numbers above.","signal":"EV"},` +
-    `{"rank":2,"sport":"MLB","matchup":"Team C @ Team D","betType":"ml","side":"home","line":null,"bet":"Team D ML","book":"FanDuel","odds":"-108","ev":"+2.9%","confidence":77,"reasoning":"Sharp reasoning.","signal":"CONSENSUS"},` +
-    `{"rank":3,"sport":"NHL","matchup":"Team E @ Team F","betType":"total","side":"under","line":5.5,"bet":"Under 5.5","book":"DraftKings","odds":"-105","ev":"+3.1%","confidence":74,"reasoning":"Sharp reasoning.","signal":"CONFLUENCE"}]}`;
+    `{"rank":1,"sport":"NFL","matchup":"Team A @ Team B","betType":"spread","side":"away","line":6.5,"bet":"Team B +6.5","book":"DraftKings","odds":"+105","ev":"+3.2%","confidence":84,"reasoning":"REVERSE LINE + FROZEN LINE confirm sharp money on the dog. Book needs the favourite.","signal":"CONSENSUS","liability":true},` +
+    `{"rank":2,"sport":"MLB","matchup":"Team C @ Team D","betType":"ml","side":"home","line":null,"bet":"Team D ML","book":"FanDuel","odds":"-108","ev":"+2.9%","confidence":77,"reasoning":"Sharp reasoning.","signal":"CONSENSUS","liability":false},` +
+    `{"rank":3,"sport":"NHL","matchup":"Team E @ Team F","betType":"total","side":"under","line":5.5,"bet":"Under 5.5","book":"DraftKings","odds":"-105","ev":"+3.1%","confidence":74,"reasoning":"Sharp reasoning.","signal":"CONFLUENCE","liability":false}]}`;
 
   const { data } = await fetchJson("https://api.anthropic.com/v1/messages", {
     method: "POST",
