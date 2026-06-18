@@ -321,6 +321,9 @@ async function generatePicks(games) {
     `Your job is not just to find +EV, it's to pick winners: prefer sides with true probability of roughly 45% or higher when they clear the EV bar. ` +
     `Only take a longshot (true probability well under 40%) if its EV is clearly exceptional (+5%+) and ideally tagged CONSENSUS or CONFLUENCE — don't fill the card with plus-money underdogs just because their EV% looks biggest. ` +
     `A card of modest favorites/near-coinflips that are genuinely +EV and likely to hit beats a card of technically-profitable longshots that lose most of the time.\n` +
+    `IMPORTANT — systematic-lag warning: if 2 or more of your top candidate picks share the same book AND the same market type (e.g. all run-line/spread edges on FanDuel, or all ML edges on DraftKings), that is a strong indicator of a systematic morning pricing lag at that book rather than independent real edges. ` +
+    `In that scenario: select at most 1 pick from that book+market combination (the one with the strongest liability signals), actively look for a pick from a different market or book to ensure variety, and note the lag in your reasoning. ` +
+    `Three picks all with identical structure (same book, same market, near-identical EV) is almost never legitimate — be suspicious.\n` +
     `Prioritise: a balance of positive EV and true win probability, CONSENSUS and CONFLUENCE tags, playoff/high-stakes spots. Be skeptical of SPLIT edges and of longshots with true probability well under 40%.\n` +
     `Signal: EV (price value), CONSENSUS (sharp books independently agree), CONFLUENCE (moneyline+spread agree).\n\n` +
     `Some games show a [LIABILITY: ...] prefix with one or more of these signals computed directly from line-movement data:\n` +
