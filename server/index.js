@@ -670,6 +670,55 @@ app.get("/api/capper", (req, res) => {
   res.json(loadCapperHistory());
 });
 
+// Debug: shows exactly what the Odds API returns per sport and why games fail.
+// Hit this to diagnose "no games" errors: /api/debug
+app.get("/api/debug", async (req, res) => {
+  if (!ODDS_KEY) return res.status(500).json({ error: "ODDS_API_KEY not set" });
+
+  const today  = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const nowMs  = Date.now();
+  const report = { today, nowUtc: new Date().toISOString(), sports: {} };
+
+  for (const [sport, key] of Object.entries(SPORTS)) {
+    try {
+      const apiUrl =
+        `https://api.the-odds-api.com/v4/sports/${key}/odds/` +
+        `?apiKey=${ODDS_KEY}&regions=us&markets=h2h,spreads,totals` +
+        `&bookmakers=pinnacle,circa_sports,draftkings,fanduel&oddsFormat=american&dateFormat=iso`;
+      const { data } = await fetchJson(apiUrl);
+      if (!Array.isArray(data)) { report.sports[sport] = { error: "non-array response", raw: data }; continue; }
+
+      const games = data.map(g => {
+        const started   = new Date(g.commence_time).getTime() <= nowMs;
+        const wrongDay  = g.commence_time.slice(0, 10) !== today;
+        const books     = (g.bookmakers || []).map(b => b.key);
+        const hasSharp  = books.some(b => ["pinnacle","circa_sports"].includes(b));
+        const hasSoft   = books.some(b => ["draftkings","fanduel"].includes(b));
+        const edges     = computeEdges([g], sport, { today, nowMs });
+        return {
+          matchup: `${g.away_team} @ ${g.home_team}`,
+          time: g.commence_time,
+          started, wrongDay,
+          books,
+          hasSharp, hasSoft,
+          edgesFound: edges.length > 0 ? edges[0].edges.length : 0,
+          skip: started ? "started" : wrongDay ? "wrong-day" : !hasSharp ? "no-sharp-book" : !hasSoft ? "no-soft-book" : null,
+        };
+      });
+
+      report.sports[sport] = {
+        total: games.length,
+        eligible: games.filter(g => !g.skip && g.edgesFound > 0).length,
+        games,
+      };
+    } catch (e) {
+      report.sports[sport] = { error: e.message };
+    }
+  }
+
+  res.json(report);
+});
+
 // Catch-all — serve React app
 app.get("*", (req, res) => {
   const index = path.join(clientBuild, "index.html");
