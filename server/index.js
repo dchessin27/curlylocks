@@ -764,7 +764,10 @@ app.listen(PORT, () => {
   console.log(`║  Claude   : ${CLAUDE_KEY ? "✓ connected" : "✗ missing (add to .env)"}          ║`);
   console.log("╚══════════════════════════════════════════╝\n");
 
-  // Warm up line history immediately, then refresh every 2 hours.
+  // Warm up line history immediately, then refresh every 8 hours (3x/day).
+  // 2-hour polling was burning through Odds API credits too fast (~12 polls/day
+  // × 4 sports ≈ 600+ credits/day). 8-hour interval still captures opening,
+  // midday, and pre-game line snapshots for liability signals.
   pollAllLines();
-  setInterval(pollAllLines, 2 * 60 * 60 * 1000);
+  setInterval(pollAllLines, 8 * 60 * 60 * 1000);
 });
