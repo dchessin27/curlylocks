@@ -510,6 +510,7 @@ app.get("/api/picks", async (req, res) => {
 
   // Picks are locked in once per day — reloading should not produce new/different bets.
   if (req.query.refresh !== "true" && latestPicks?.date === todayLabel()) {
+    appendToHistory(latestPicks); // ensure picks are in the server record even on cache hits
     return res.json(latestPicks);
   }
 
