@@ -203,23 +203,37 @@ function loadHistory() {
 
 function appendToHistory(picks) {
   try {
-    const history = loadHistory();
-    if (history.some(h => h.date === picks.date)) return;
-    history.push({
+    const history    = loadHistory();
+    const existingIdx = history.findIndex(h => h.date === picks.date);
+    const prevBets   = existingIdx >= 0 ? history[existingIdx].bets : [];
+    const entry = {
       date:        picks.date,
       generatedAt: new Date().toISOString(),
-      bets: (picks.bets || []).map(b => ({
-        sport:        b.sport,
-        matchup:      b.matchup,
-        bet:          b.bet,
-        book:         b.book,
-        odds:         b.odds,
-        ev:           b.ev,
-        signal:       b.signal,
-        commenceTime: b.commenceTime ?? null,
-        closingLine:  b.closingLine  ?? null,
-      })),
-    });
+      bets: (picks.bets || []).map(b => {
+        const [away, home] = (b.matchup || "").split("@").map(s => s.trim());
+        const prev = prevBets.find(e => e.bet === b.bet);
+        return {
+          sport:        b.sport,
+          matchup:      b.matchup,
+          bet:          b.bet,
+          book:         b.book,
+          odds:         b.odds,
+          ev:           b.ev,
+          confidence:   b.confidence   ?? null,
+          signal:       b.signal,
+          betType:      b.betType      ?? "ml",
+          side:         b.side         ?? null,
+          line:         b.line         ?? null,
+          home:         home           ?? null,
+          away:         away           ?? null,
+          commenceTime: b.commenceTime ?? null,
+          closingLine:  prev?.closingLine ?? b.closingLine ?? null,
+          result:       prev?.result      ?? "pending",
+        };
+      }),
+    };
+    if (existingIdx >= 0) history[existingIdx] = entry;
+    else history.push(entry);
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
   } catch (e) { console.warn("[history] append failed:", e.message); }
@@ -598,6 +612,39 @@ app.get("/api/backtest", async (req, res) => {
 // Returns the full picks history (all days with closing lines for CLV analysis).
 app.get("/api/history", (req, res) => {
   res.json(loadHistory());
+});
+
+// Update a pick's result or closing line in the server-side record.
+app.patch("/api/record", (req, res) => {
+  const { date, bet, result, closingLine } = req.body;
+  if (!date || !bet) return res.status(400).json({ error: "date and bet required" });
+  if (result !== undefined && !["win","loss","push","pending"].includes(result))
+    return res.status(400).json({ error: "invalid result value" });
+  try {
+    const history = loadHistory();
+    const day  = history.find(h => h.date === date);
+    if (!day)  return res.status(404).json({ error: "Date not found" });
+    const pick = day.bets.find(b => b.bet === bet);
+    if (!pick) return res.status(404).json({ error: "Pick not found" });
+    if (result      !== undefined) pick.result      = result;
+    if (closingLine !== undefined) pick.closingLine = closingLine;
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Remove a pick from the server-side record.
+app.delete("/api/record", (req, res) => {
+  const { date, bet } = req.query;
+  if (!date || !bet) return res.status(400).json({ error: "date and bet required" });
+  try {
+    const history = loadHistory();
+    const day = history.find(h => h.date === date);
+    if (!day) return res.status(404).json({ error: "Date not found" });
+    day.bets = day.bets.filter(b => b.bet !== bet);
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Single historical snapshot probe — fast, just 1 API call (~30 credits).

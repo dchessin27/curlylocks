@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from "react";
 
 // ─── STORAGE ─────────────────────────────────────────────────────────────────
-const RECORD_KEY   = "cl_record_v3";
+// Record (W/L) is stored server-side in picks-history.json — works across all devices.
+// Settings stay in localStorage (device-specific preferences only).
 const SETTINGS_KEY = "cl_settings_v1";
-
-const loadRecord   = () => { try { return JSON.parse(localStorage.getItem(RECORD_KEY)   || "[]");  } catch { return []; } };
-const saveRecord   = r  => localStorage.setItem(RECORD_KEY,   JSON.stringify(r));
 const loadSettings = () => { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{"bankroll":10000,"unitPct":1}'); } catch { return { bankroll: 10000, unitPct: 1 }; } };
 const saveSettings = s  => localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
 
@@ -17,11 +15,6 @@ const pickPL = p => p.result === "win" ? (oddsToDecimal(p.odds) - 1) * 100 : p.r
 const unitsToDollars = (u, b, p = 1) => (u * p / 100) * b;
 const fmtDollars = a => { const abs = Math.abs(a), sign = a >= 0 ? "+" : "-"; return abs >= 1000 ? `${sign}$${(abs/1000).toFixed(1)}k` : `${sign}$${abs.toFixed(0)}`; };
 
-function betToEntry(bet, date) {
-  // matchup format from Claude is "Away @ Home"
-  const [away, home] = (bet.matchup || "").split("@").map(s => s.trim());
-  return { id: Date.now()+Math.random(), date, bet:bet.bet, sport:bet.sport, signal:bet.signal, book:bet.book, odds:parseOdds(bet.odds), ev:bet.ev, confidence:bet.confidence, matchup:bet.matchup, home, away, betType:bet.betType || "ml", side:bet.side || null, line:bet.line ?? null, result:"pending", closingLine:bet.closingLine ?? null };
-}
 
 function calcStats(picks) {
   if (!picks.length) return null;
@@ -550,15 +543,37 @@ export default function App() {
   const [landed,   setLanded]   = useState([0, 0, 0]);
   const [data,     setData]     = useState(null);
   const [error,    setError]    = useState(null);
-  const [record,   setRecord]   = useState(() => loadRecord());
   const [syncingCLV, setSyncingCLV] = useState(false);
   const [settings,   setSettings]   = useState(() => loadSettings());
   const [history,    setHistory]    = useState([]);
   const { bankroll, unitPct } = settings;
 
-  useEffect(() => { load(); autoSettleRecord(); fetchHistory(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Record is derived from server-side history — same on every device.
+  const record = history.flatMap(h =>
+    (h.bets || []).map(b => ({
+      id:          h.date + "||" + b.bet,
+      date:        h.date,
+      sport:       b.sport       || null,
+      matchup:     b.matchup     || null,
+      bet:         b.bet,
+      book:        b.book        || null,
+      odds:        parseOdds(b.odds),
+      ev:          b.ev          || null,
+      confidence:  b.confidence  ?? null,
+      signal:      b.signal      || null,
+      betType:     b.betType     || "ml",
+      side:        b.side        || null,
+      line:        b.line        ?? null,
+      home:        b.home        || null,
+      away:        b.away        || null,
+      result:      b.result      || "pending",
+      closingLine: b.closingLine ?? null,
+    }))
+  );
 
-  async function fetchHistory() {
+  useEffect(() => { load(); fetchHistory(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function fetchHistoryQuiet() {
     try {
       const r = await fetch("/api/history");
       const h = await r.json();
@@ -566,27 +581,13 @@ export default function App() {
     } catch {}
   }
 
-  // Automatically track every pick the moment it's loaded — no manual "log" needed.
-  // Also backfill closingLine onto already-tracked picks once the server has
-  // captured it (auto-captured ~10 min before kickoff).
-  useEffect(() => {
-    if (!data?.bets?.length) return;
-    setRecord(prev => {
-      let changed = false;
-      const withCLV = prev.map(p => {
-        if (p.date !== data.date || p.closingLine != null) return p;
-        const bet = data.bets.find(b => b.bet === p.bet);
-        if (!bet || bet.closingLine == null) return p;
-        changed = true;
-        return { ...p, closingLine: bet.closingLine };
-      });
-      const fresh = data.bets.filter(bet => !withCLV.some(p => p.bet===bet.bet && p.date===data.date));
-      if (!fresh.length && !changed) return prev;
-      const updated = fresh.length ? [...fresh.map(bet => betToEntry(bet, data.date)), ...withCLV] : withCLV;
-      saveRecord(updated);
-      return updated;
-    });
-  }, [data]);
+  async function fetchHistory() {
+    try {
+      const r = await fetch("/api/history");
+      const h = await r.json();
+      if (Array.isArray(h)) { setHistory(h); await autoSettleWithHistory(h); }
+    } catch {}
+  }
 
   async function load() {
     setStatus("loading"); setError(null);
@@ -608,15 +609,27 @@ export default function App() {
   }
 
   async function resetAll() {
-    if (!window.confirm("Clear today's locked picks and your tracked history? The next load will generate a fresh set of picks for today. This can't be undone.")) return;
-    setRecord([]); saveRecord([]);
+    if (!window.confirm("Clear today's locked picks and generate a fresh set? Your record history is preserved.")) return;
     try { await fetch("/api/reset", { method: "POST" }); } catch {}
     setData(null);
     load();
   }
 
-  function settle(id, result)  { const u = record.map(p => p.id===id ? {...p,result} : p); setRecord(u); saveRecord(u); }
-  function deletePick(id)      { const u = record.filter(p => p.id!==id); setRecord(u); saveRecord(u); }
+  async function settle(id, result) {
+    const sep  = id.indexOf("||");
+    const date = id.slice(0, sep);
+    const bet  = id.slice(sep + 2);
+    await fetch("/api/record", { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ date, bet, result }) });
+    await fetchHistoryQuiet();
+  }
+
+  async function deletePick(id) {
+    const sep  = id.indexOf("||");
+    const date = id.slice(0, sep);
+    const bet  = id.slice(sep + 2);
+    await fetch(`/api/record?date=${encodeURIComponent(date)}&bet=${encodeURIComponent(bet)}`, { method:"DELETE" });
+    await fetchHistoryQuiet();
+  }
 
   function gradeBet(p, game) {
     const betType = p.betType || "ml";
@@ -643,8 +656,12 @@ export default function App() {
     return side === winner ? "win" : "loss";
   }
 
-  async function autoSettleRecord() {
-    const pending = record.filter(p => p.result === "pending" && p.home && p.away && p.sport);
+  async function autoSettleWithHistory(historyData) {
+    const pending = historyData.flatMap(h =>
+      (h.bets || [])
+        .filter(b => b.result === "pending" && b.home && b.away && b.sport)
+        .map(b => ({ ...b, date: h.date }))
+    );
     if (!pending.length) return;
 
     const sports = [...new Set(pending.map(p => p.sport))];
@@ -657,24 +674,24 @@ export default function App() {
       } catch {}
     }
 
-    let updated = record, changed = false;
+    let anySettled = false;
     for (const p of pending) {
       const game = (scoresBySport[p.sport] || []).find(g => g.home === p.home && g.away === p.away);
       if (!game) continue;
-
       const result = gradeBet(p, game);
       if (!result) continue;
-      updated = updated.map(x => x.id === p.id ? { ...x, result } : x);
-      changed = true;
+      try {
+        await fetch("/api/record", { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ date:p.date, bet:p.bet, result }) });
+        anySettled = true;
+      } catch {}
     }
-    if (changed) { setRecord(updated); saveRecord(updated); }
+    if (anySettled) await fetchHistoryQuiet();
   }
 
   async function syncClosingLines() {
     const targets = record.filter(p => (p.closingLine===null || p.closingLine===undefined) && p.home && p.away);
     if (!targets.length) return;
     setSyncingCLV(true);
-    const updates = {};
     for (const p of targets) {
       try {
         const betType = p.betType || "ml";
@@ -683,7 +700,6 @@ export default function App() {
         if (!r.ok) continue;
         const bk = body.books?.[p.book.toLowerCase()];
         if (!bk) continue;
-
         let price;
         if (betType === "total") {
           price = p.side === "under" ? bk.under : bk.over;
@@ -691,13 +707,12 @@ export default function App() {
           const side = p.side || (p.bet.includes(body.home) ? "home" : "away");
           price = side === "home" ? bk.home : bk.away;
         }
-        if (price !== undefined && price !== null) updates[p.id] = price;
+        if (price !== undefined && price !== null) {
+          await fetch("/api/record", { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ date:p.date, bet:p.bet, closingLine:price }) });
+        }
       } catch {}
     }
-    if (Object.keys(updates).length) {
-      const u = record.map(p => updates[p.id]!==undefined ? {...p, closingLine:updates[p.id]} : p);
-      setRecord(u); saveRecord(u);
-    }
+    await fetchHistoryQuiet();
     setSyncingCLV(false);
   }
   function saveSettingsHandler(br, up) { const s={bankroll:br,unitPct:up}; setSettings(s); saveSettings(s); }
