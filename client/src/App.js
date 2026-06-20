@@ -731,7 +731,7 @@ export default function App() {
             <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:36, fontWeight:800, letterSpacing:2, lineHeight:1 }}>
               <span style={{ color:"#cef17b" }}>CURLY</span><span style={{ color:"#cdedb3" }}> LOCKS</span>
             </div>
-            <div style={{ fontSize:9, color:"#3f6b58", marginTop:4, letterSpacing:1 }}>3 BEST BETS TODAY · LIVE ODDS</div>
+            <div style={{ fontSize:9, color:"#3f6b58", marginTop:4, letterSpacing:1 }}>SHARP PICKS · LIVE ODDS</div>
           </div>
           <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:6 }}>
             {overall?.hitRate && <div style={{ background:parseFloat(overall.roi||0)>=0?"#22ff9914":"#ff554414", border:`1px solid ${parseFloat(overall.roi||0)>=0?"#22ff9933":"#ff554433"}`, borderRadius:5, padding:"3px 10px", fontSize:9, textAlign:"right", lineHeight:1.8, color:parseFloat(overall.roi||0)>=0?"#22ff99":"#ff5544" }}>
