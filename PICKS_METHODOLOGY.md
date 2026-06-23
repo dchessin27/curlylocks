@@ -127,9 +127,9 @@ After the data pipeline runs, the server sends everything to Claude (claude-sonn
 2. One pick per game maximum — never the same matchup twice in different markets
 3. How to balance EV% vs. true win probability (see below)
 
-**The probability correction:** American odds are mathematically convex — a +200 longshot showing +5% EV looks proportionally bigger than a -110 bet showing +3% EV, but the longshot loses 67% of the time. Raw EV% alone is biased toward plus-money underdogs. Claude is instructed to prefer sides with true probability ≥ 45% when they clear the EV bar, and to only take longshots (true prob < 40%) if EV is clearly exceptional (+5%+) AND they're tagged CONSENSUS or CONFLUENCE.
+**The probability correction:** American odds are mathematically convex — a +200 longshot showing +5% EV looks proportionally bigger than a -110 bet showing +3% EV, but the longshot loses 67% of the time. Raw EV% alone is biased toward plus-money underdogs. Claude is instructed to require true probability ≥ 50% (a hard floor, not a preference) before an edge qualifies at all, and to only take a longshot (true prob < 50%) if EV is clearly exceptional (+6%+) AND it carries both a CONSENSUS-or-CONFLUENCE tag AND a liability signal — all together, not just one.
 
-**The bar:** Positive EV vs the no-vig sharp line, ideally +2% or better. Edges that are barely positive, untagged, SPLIT, or are fragile longshots do not qualify.
+**The bar:** Positive EV vs the no-vig sharp line, REQUIRED to be +3% or better — anything below does not qualify. Every pick must also carry at least one corroborating signal beyond raw EV (CONSENSUS, CONFLUENCE, or a liability signal); a "naked" EV edge with no tag and no liability signal is excluded regardless of how large the EV% looks. Edges that are barely positive, untagged, SPLIT, or are fragile longshots do not qualify. Target hit rate is 60%+ — fewer, stronger picks beat a padded card.
 
 ---
 

@@ -319,7 +319,7 @@ async function generatePicks(games) {
     `Here are today's real games across every tracked sport/league. For each game, the moneyline, spread, and total are listed ` +
     `with the best-priced book for each side and that side's exact EV vs the blended sharp no-vig line (Pinnacle and/or Circa):\n\n` +
     `${gameLines}\n\n` +
-    `Pick ONLY bets that represent a real, sharp edge — positive EV vs the sharp no-vig line above, ideally +2% EV or better. ` +
+    `Pick ONLY bets that represent a real, sharp edge — positive EV vs the sharp no-vig line above, and REQUIRE +3% EV or better. Anything below +3% does not qualify, no exceptions. ` +
     `Moneyline, spread, and total bets are all fair game — pick whichever market shows the strongest genuine edge for a given game.\n` +
     `Return AT MOST 3 bets total, ranked best first, ONE PICK PER GAME — never return the same matchup twice, even at a different book or in a different market. ` +
     `If only 1 or 2 games today clear the bar, return only those — do NOT pad the list with mediocre or break-even bets just to reach 3. ` +
@@ -332,13 +332,15 @@ async function generatePicks(games) {
     `CONFLUENCE means the moneyline AND spread both favor the same team — two independent markets agreeing the soft book is underpricing them, a strong signal.\n` +
     `Each edge also shows "true X%" — the blended sharp probability that side actually wins/covers/hits. ` +
     `American odds are convex, so the SAME probability misestimate produces a much bigger EV% on a plus-money longshot than on a favorite — raw EV% alone is biased toward longshots. ` +
-    `Your job is not just to find +EV, it's to pick winners: prefer sides with true probability of roughly 45% or higher when they clear the EV bar. ` +
-    `Only take a longshot (true probability well under 40%) if its EV is clearly exceptional (+5%+) and ideally tagged CONSENSUS or CONFLUENCE — don't fill the card with plus-money underdogs just because their EV% looks biggest. ` +
-    `A card of modest favorites/near-coinflips that are genuinely +EV and likely to hit beats a card of technically-profitable longshots that lose most of the time.\n` +
+    `Your job is not just to find +EV, it's to pick winners: REQUIRE true probability of roughly 50% or higher — this is a hard floor, not a preference. ` +
+    `Only take a longshot (true probability under 50%) if its EV is clearly exceptional (+6%+) AND it carries BOTH a CONSENSUS-or-CONFLUENCE tag AND a liability signal — all of that together, not just one. Otherwise skip it, regardless of how big the raw EV% looks. ` +
+    `A card of modest favorites/near-coinflips that are genuinely +EV and likely to hit beats a card of technically-profitable longshots that lose most of the time. The target hit rate is 60%+ — 1-2 elite picks beat 3 mediocre ones every time, so when in doubt, return fewer.\n` +
+    `HARD REQUIREMENT — every pick must carry at least one corroborating signal beyond raw EV: a CONSENSUS or CONFLUENCE tag, or a liability signal (REVERSE LINE / FROZEN LINE / SHARP/SOFT GAP). ` +
+    `A "naked" edge with no tag and no liability signal does NOT qualify, no matter how large its EV% appears — raw EV alone is not sufficient confirmation, it must be corroborated by at least one independent signal.\n` +
     `IMPORTANT — systematic-lag warning: if 2 or more of your top candidate picks share the same book AND the same market type (e.g. all run-line/spread edges on FanDuel, or all ML edges on DraftKings), that is a strong indicator of a systematic morning pricing lag at that book rather than independent real edges. ` +
     `In that scenario: select at most 1 pick from that book+market combination (the one with the strongest liability signals), actively look for a pick from a different market or book to ensure variety, and note the lag in your reasoning. ` +
     `Three picks all with identical structure (same book, same market, near-identical EV) is almost never legitimate — be suspicious.\n` +
-    `Prioritise: a balance of positive EV and true win probability, CONSENSUS and CONFLUENCE tags, playoff/high-stakes spots. Be skeptical of SPLIT edges and of longshots with true probability well under 40%.\n` +
+    `Prioritise: a balance of positive EV and true win probability, CONSENSUS and CONFLUENCE tags, playoff/high-stakes spots. Be skeptical of SPLIT edges and of longshots with true probability under 50%.\n` +
     `Signal: EV (price value), CONSENSUS (sharp books independently agree), CONFLUENCE (moneyline+spread agree).\n\n` +
     `Some games show a [LIABILITY: ...] prefix with one or more of these signals computed directly from line-movement data:\n` +
     `REVERSE LINE — the spread moved toward the underdog since opening despite public money piling on the favourite. ` +
