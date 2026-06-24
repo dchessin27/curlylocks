@@ -270,7 +270,7 @@ function RecordTab({ record, bankroll, unitPct, onSettle, onDelete, onSyncClosin
                     <div key={p.id} style={{ background:"#08140f", border:"1px solid #0f2e22", borderRadius:7, padding:"10px 12px", marginBottom:6, display:"flex", justifyContent:"space-between", alignItems:"center", gap:10 }}>
                       <div style={{ minWidth:0 }}>
                         <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:14, fontWeight:700, color:"#cdedb3" }}>{p.bet}</div>
-                        <div style={{ fontSize:9, color:"#3f6b58", marginTop:2 }}>{p.book} {fmtOdds(p.odds)} · {p.sport} · {p.date}</div>
+                        <div style={{ fontSize:9, color:"#3f6b58", marginTop:2 }}>{p.matchup ? `${p.matchup} · ` : ""}{p.book} {fmtOdds(p.odds)} · {p.sport} · {p.date}</div>
                         <div style={{ marginTop:5 }}><CLVBadge pick={p} /></div>
                       </div>
                       <div style={{ display:"flex", gap:5, flexShrink:0 }}>
@@ -404,7 +404,7 @@ function RecordTab({ record, bankroll, unitPct, onSettle, onDelete, onSyncClosin
               <div key={p.id} style={{ background:"#08140f", border:`1px solid ${isWin?"#22ff9933":isLoss?"#ff554433":"#0f2e22"}`, borderLeft:`3px solid ${isWin?"#22ff99":isLoss?"#ff5544":"#3f6b58"}`, borderRadius:7, padding:"10px 13px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:14, fontWeight:700, color:isWin?"#22ff99":isLoss?"#ff7766":"#7a9488" }}>{p.bet}</div>
-                  <div style={{ fontSize:9, color:"#3f6b58", marginTop:2 }}>{SI[p.sport]} {p.sport} · {p.signal} · {p.book} {fmtOdds(p.odds)} · {p.date}</div>
+                  <div style={{ fontSize:9, color:"#3f6b58", marginTop:2 }}>{p.matchup ? `${p.matchup} · ` : ""}{SI[p.sport]} {p.sport} · {p.signal} · {p.book} {fmtOdds(p.odds)} · {p.date}</div>
                   <div style={{ marginTop:5 }}><CLVBadge pick={p} /></div>
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0, marginLeft:10 }}>
