@@ -551,7 +551,7 @@ export default function App() {
   // Record is derived from server-side history — same on every device.
   const record = history.flatMap(h =>
     (h.bets || []).map(b => ({
-      id:          h.date + "||" + b.bet,
+      id:          h.date + "||" + b.bet + "||" + (b.matchup || ""),
       date:        h.date,
       sport:       b.sport       || null,
       matchup:     b.matchup     || null,
@@ -616,18 +616,14 @@ export default function App() {
   }
 
   async function settle(id, result) {
-    const sep  = id.indexOf("||");
-    const date = id.slice(0, sep);
-    const bet  = id.slice(sep + 2);
-    await fetch("/api/record", { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ date, bet, result }) });
+    const [date, bet, matchup] = id.split("||");
+    await fetch("/api/record", { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ date, bet, matchup, result }) });
     await fetchHistoryQuiet();
   }
 
   async function deletePick(id) {
-    const sep  = id.indexOf("||");
-    const date = id.slice(0, sep);
-    const bet  = id.slice(sep + 2);
-    await fetch(`/api/record?date=${encodeURIComponent(date)}&bet=${encodeURIComponent(bet)}`, { method:"DELETE" });
+    const [date, bet, matchup] = id.split("||");
+    await fetch(`/api/record?date=${encodeURIComponent(date)}&bet=${encodeURIComponent(bet)}&matchup=${encodeURIComponent(matchup)}`, { method:"DELETE" });
     await fetchHistoryQuiet();
   }
 

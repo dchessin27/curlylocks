@@ -617,9 +617,18 @@ app.get("/api/history", (req, res) => {
   res.json(loadHistory());
 });
 
+// Bet label alone isn't always unique within a day (e.g. two different
+// games can both produce an "Under 8" pick) — disambiguate with matchup
+// when there's more than one candidate and a matchup was provided.
+function findPick(day, bet, matchup) {
+  const candidates = day.bets.filter(b => b.bet === bet);
+  if (candidates.length <= 1) return candidates[0];
+  return (matchup && candidates.find(b => b.matchup === matchup)) || candidates[0];
+}
+
 // Update a pick's result or closing line in the server-side record.
 app.patch("/api/record", (req, res) => {
-  const { date, bet, result, closingLine } = req.body;
+  const { date, bet, matchup, result, closingLine } = req.body;
   if (!date || !bet) return res.status(400).json({ error: "date and bet required" });
   if (result !== undefined && !["win","loss","push","pending"].includes(result))
     return res.status(400).json({ error: "invalid result value" });
@@ -627,7 +636,7 @@ app.patch("/api/record", (req, res) => {
     const history = loadHistory();
     const day  = history.find(h => h.date === date);
     if (!day)  return res.status(404).json({ error: "Date not found" });
-    const pick = day.bets.find(b => b.bet === bet);
+    const pick = findPick(day, bet, matchup);
     if (!pick) return res.status(404).json({ error: "Pick not found" });
     if (result      !== undefined) pick.result      = result;
     if (closingLine !== undefined) pick.closingLine = closingLine;
@@ -638,13 +647,15 @@ app.patch("/api/record", (req, res) => {
 
 // Remove a pick from the server-side record.
 app.delete("/api/record", (req, res) => {
-  const { date, bet } = req.query;
+  const { date, bet, matchup } = req.query;
   if (!date || !bet) return res.status(400).json({ error: "date and bet required" });
   try {
     const history = loadHistory();
     const day = history.find(h => h.date === date);
     if (!day) return res.status(404).json({ error: "Date not found" });
-    day.bets = day.bets.filter(b => b.bet !== bet);
+    const pick = findPick(day, bet, matchup);
+    if (!pick) return res.status(404).json({ error: "Pick not found" });
+    day.bets = day.bets.filter(b => b !== pick);
     fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
