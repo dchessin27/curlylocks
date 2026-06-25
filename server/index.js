@@ -383,13 +383,14 @@ async function generatePicks(games) {
     headers: { "x-api-key": CLAUDE_KEY, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
-      max_tokens: 1000,
+      max_tokens: 2000,
       temperature: 0,
       messages: [{ role: "user", content: fullPrompt }],
     }),
   });
 
   if (data.error) throw new Error("Claude: " + data.error.message);
+  if (data.stop_reason === "max_tokens") throw new Error("Claude response was truncated (hit max_tokens) — raise the limit in generatePicks().");
   const tb = (data.content || []).find(b => b.type === "text");
   if (!tb) throw new Error("No text in Claude response");
 
@@ -397,7 +398,12 @@ async function generatePicks(games) {
   const s = raw.indexOf("{"), e = raw.lastIndexOf("}");
   if (s === -1 || e === -1) throw new Error("No JSON in response: " + raw.slice(0, 100));
 
-  const parsed = JSON.parse(raw.slice(s, e + 1));
+  let parsed;
+  try {
+    parsed = JSON.parse(raw.slice(s, e + 1));
+  } catch (err) {
+    throw new Error(`Malformed JSON from Claude (possibly truncated): ${err.message}`);
+  }
   if (!Array.isArray(parsed.bets)) throw new Error("No bets array in response");
 
   // Attach each game's real start time so we can schedule pre-game alerts
