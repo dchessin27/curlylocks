@@ -113,42 +113,61 @@ function computeEdges(data, sport, { today, nowMs }) {
     }
 
     // ── Spread ──
+    // Guard: a sharp book's true probability for "home at point X" is only
+    // comparable to a soft book's price if the soft book is offering that
+    // SAME point. Books occasionally disagree on which side is even the
+    // favorite (e.g. a near-50/50 game) — Pinnacle might have the home team
+    // -1.5 while a soft book has the away team -1.5. Matching by team name
+    // alone in that case silently compares two different bets (e.g. "Cubs
+    // +1.5" sharp probability applied to a "Cubs -1.5" soft price), producing
+    // a huge fake EV. Require all sharp books to agree on both points, and
+    // only accept a soft quote at the exact matching point.
     sharps = sharpsFor(spreads);
     if (sharps.length && (spreads.draftkings || spreads.fanduel)) {
-      const perBook = sharps.map(b => noVigProbs(toDecimal(spreads[b].home.price), toDecimal(spreads[b].away.price)));
-      const [tH, tA] = blendedTrueProbs(
-        sharps.map(b => toDecimal(spreads[b].home.price)),
-        sharps.map(b => toDecimal(spreads[b].away.price)),
-      );
-      for (const [side, trueProb, idx] of [["home", tH, 0], ["away", tA, 1]]) {
-        let best = null;
-        for (const book of SOFT_BOOKS) {
-          const o = spreads[book]?.[side];
-          if (!o) continue;
-          const ev = calcEV(trueProb, toDecimal(o.price));
-          if (!best || ev > best.ev) best = { book, price: o.price, point: o.point, ev };
+      const sharpPoint = { home: spreads[sharps[0]].home.point, away: spreads[sharps[0]].away.point };
+      const sharpsAgreeOnPoints = sharps.every(b => spreads[b].home.point === sharpPoint.home && spreads[b].away.point === sharpPoint.away);
+      if (sharpsAgreeOnPoints) {
+        const perBook = sharps.map(b => noVigProbs(toDecimal(spreads[b].home.price), toDecimal(spreads[b].away.price)));
+        const [tH, tA] = blendedTrueProbs(
+          sharps.map(b => toDecimal(spreads[b].home.price)),
+          sharps.map(b => toDecimal(spreads[b].away.price)),
+        );
+        for (const [side, trueProb, idx] of [["home", tH, 0], ["away", tA, 1]]) {
+          let best = null;
+          for (const book of SOFT_BOOKS) {
+            const o = spreads[book]?.[side];
+            if (!o || o.point !== sharpPoint[side]) continue;
+            const ev = calcEV(trueProb, toDecimal(o.price));
+            if (!best || ev > best.ev) best = { book, price: o.price, point: o.point, ev };
+          }
+          if (best) edges.push({ market: "spread", side, sharpSource: sharps.join("+"), consensus: sharpAgreement(perBook, idx, best.price, best.ev), trueProb, ...best });
         }
-        if (best) edges.push({ market: "spread", side, sharpSource: sharps.join("+"), consensus: sharpAgreement(perBook, idx, best.price, best.ev), trueProb, ...best });
       }
     }
 
     // ── Total ──
+    // Same point-matching guard as spreads — a soft book's total line (e.g.
+    // 8 vs 8.5) must match the sharp consensus's line before comparing.
     sharps = sharpsFor(totals);
     if (sharps.length && (totals.draftkings || totals.fanduel)) {
-      const perBook = sharps.map(b => noVigProbs(toDecimal(totals[b].over.price), toDecimal(totals[b].under.price)));
-      const [tO, tU] = blendedTrueProbs(
-        sharps.map(b => toDecimal(totals[b].over.price)),
-        sharps.map(b => toDecimal(totals[b].under.price)),
-      );
-      for (const [side, trueProb, idx] of [["over", tO, 0], ["under", tU, 1]]) {
-        let best = null;
-        for (const book of SOFT_BOOKS) {
-          const o = totals[book]?.[side];
-          if (!o) continue;
-          const ev = calcEV(trueProb, toDecimal(o.price));
-          if (!best || ev > best.ev) best = { book, price: o.price, point: o.point, ev };
+      const sharpPoint = { over: totals[sharps[0]].over.point, under: totals[sharps[0]].under.point };
+      const sharpsAgreeOnPoints = sharps.every(b => totals[b].over.point === sharpPoint.over && totals[b].under.point === sharpPoint.under);
+      if (sharpsAgreeOnPoints) {
+        const perBook = sharps.map(b => noVigProbs(toDecimal(totals[b].over.price), toDecimal(totals[b].under.price)));
+        const [tO, tU] = blendedTrueProbs(
+          sharps.map(b => toDecimal(totals[b].over.price)),
+          sharps.map(b => toDecimal(totals[b].under.price)),
+        );
+        for (const [side, trueProb, idx] of [["over", tO, 0], ["under", tU, 1]]) {
+          let best = null;
+          for (const book of SOFT_BOOKS) {
+            const o = totals[book]?.[side];
+            if (!o || o.point !== sharpPoint[side]) continue;
+            const ev = calcEV(trueProb, toDecimal(o.price));
+            if (!best || ev > best.ev) best = { book, price: o.price, point: o.point, ev };
+          }
+          if (best) edges.push({ market: "total", side, sharpSource: sharps.join("+"), consensus: sharpAgreement(perBook, idx, best.price, best.ev), trueProb, ...best });
         }
-        if (best) edges.push({ market: "total", side, sharpSource: sharps.join("+"), consensus: sharpAgreement(perBook, idx, best.price, best.ev), trueProb, ...best });
       }
     }
 

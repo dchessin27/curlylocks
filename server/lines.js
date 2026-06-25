@@ -122,7 +122,13 @@ function computeLiability(filePath, liveData) {
     // ── 3. Sharp/soft spread gap ──────────────────────────────────────────────
     if (pinSpread !== null && softSpread !== null) {
       const gap = pinSpread - softSpread;
-      if (Math.abs(gap) >= 0.5) {
+      // If the signs differ, the books disagree on which team is even the
+      // favorite (e.g. Pinnacle home -1.5 vs soft book home +1.5) — that's
+      // not "soft book lagging on the same line," it's two incompatible
+      // bets, and the "gift" framing below doesn't apply. Only flag this as
+      // an actionable gap when both books agree on direction.
+      const sameDirection = pinSpread === 0 || softSpread === 0 || Math.sign(pinSpread) === Math.sign(softSpread);
+      if (Math.abs(gap) >= 0.5 && sameDirection) {
         // gap < 0: Pinnacle gives home FEWER points → underdog gets a better number at soft book
         // gap > 0: Pinnacle gives home MORE points  → favourite gets a better number at soft book
         signals.push({
