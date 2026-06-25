@@ -72,6 +72,8 @@ That means: for every $100 bet on Team A at DraftKings, the expected profit is $
 
 We find the **best-priced soft book** for each side: if DraftKings offers -105 and FanDuel offers -108 for the same side, we record the DraftKings price (higher EV).
 
+**Point-matching guard (spreads and totals only):** A soft book's price only counts if it's quoting the exact same point as the sharp consensus. MLB run lines are always ±1.5, but which team holds -1.5 vs +1.5 can occasionally differ between books on a near-even game — Pinnacle might have the home team -1.5 while a soft book has the home team +1.5. That's not a soft book lagging on the same bet, it's two different bets entirely, and naively matching by team name produces a fabricated edge (this caused several real false-positive "OFFICIAL PLAY" picks — see `/api/debug`'s `spreadsByBook` field to inspect raw points if a recurring high-EV pattern looks suspicious). The engine now requires the soft book's point to exactly equal the sharp side's point before computing EV; if they disagree, no edge is produced for that side.
+
 ---
 
 ## Step 4: Signal Tags — What Type of Edge Is It?
