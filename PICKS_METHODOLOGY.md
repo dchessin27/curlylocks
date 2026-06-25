@@ -133,6 +133,8 @@ After the data pipeline runs, the server sends everything to Claude (claude-sonn
 
 **The bar:** Positive EV vs the no-vig sharp line, REQUIRED to be +3% or better — anything below does not qualify. Every pick must also carry at least one corroborating signal beyond raw EV (CONSENSUS, CONFLUENCE, or a liability signal); a "naked" EV edge with no tag and no liability signal is excluded regardless of how large the EV% looks. Edges that are barely positive, untagged, SPLIT, or are fragile longshots do not qualify. Target hit rate is 60%+ — fewer, stronger picks beat a padded card.
 
+**Ranking — winning plays over theoretical profitability:** EV-positive and high-probability-to-win are not the same target. A 51% true-probability pick with +5% EV is mathematically sharp but will still lose nearly half the time — that's thin-edge betting, not a "winner." Once a pick clears the EV/probability/corroboration bars above, picks are ranked by **true win probability and liability conviction first, EV% size second** — EV is a qualifying gate, not what decides which pick is best. Liability signals (REVERSE LINE / FROZEN LINE / SHARP/SOFT GAP) are weighted above CONSENSUS/CONFLUENCE as corroboration: liability reflects actual money movement and book exposure — independent evidence a side is likely to win — whereas CONSENSUS/CONFLUENCE are our own pricing model agreeing with itself across markets, not truly independent confirmation.
+
 ---
 
 ## Step 7: Delivery — One Set of Picks Per Day
