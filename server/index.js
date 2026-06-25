@@ -765,6 +765,14 @@ app.get("/api/debug", async (req, res) => {
         const hasSharp  = books.some(b => ["pinnacle","circa_sports"].includes(b));
         const hasSoft   = books.some(b => ["draftkings","fanduel"].includes(b));
         const edges     = computeEdges([g], sport, { today, nowMs });
+        const spreadsByBook = {};
+        for (const bm of g.bookmakers || []) {
+          const m = (bm.markets || []).find(mm => mm.key === "spreads");
+          if (!m) continue;
+          const ho = m.outcomes.find(o => o.name === g.home_team);
+          const ao = m.outcomes.find(o => o.name === g.away_team);
+          spreadsByBook[bm.key] = { home: { point: ho?.point, price: ho?.price }, away: { point: ao?.point, price: ao?.price } };
+        }
         return {
           matchup: `${g.away_team} @ ${g.home_team}`,
           time: g.commence_time,
@@ -773,6 +781,7 @@ app.get("/api/debug", async (req, res) => {
           hasSharp, hasSoft,
           edgesFound: edges.length > 0 ? edges[0].edges.length : 0,
           skip: started ? "started" : wrongDay ? "wrong-day" : !hasSharp ? "no-sharp-book" : !hasSoft ? "no-soft-book" : null,
+          spreadsByBook,
         };
       });
 
