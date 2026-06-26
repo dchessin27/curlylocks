@@ -782,6 +782,11 @@ app.get("/api/debug", async (req, res) => {
           books,
           hasSharp, hasSoft,
           edgesFound: edges.length > 0 ? edges[0].edges.length : 0,
+          edgeDetails: edges.length > 0 ? edges[0].edges.map(e => ({
+            market: e.market, side: e.side, book: e.book, price: e.price, point: e.point,
+            trueProb: +(e.trueProb * 100).toFixed(1), ev: +e.ev.toFixed(2),
+            consensus: e.consensus, confluence: !!e.confluence,
+          })) : [],
           skip: started ? "started" : wrongDay ? "wrong-day" : !hasSharp ? "no-sharp-book" : !hasSoft ? "no-soft-book" : null,
           spreadsByBook,
         };
