@@ -49,7 +49,7 @@ function calcCLVStats(picks) {
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const SC  = { NFL:"#cef17b", NBA:"#e85d3a", MLB:"#4aade8", NHL:"#7ecfcf", MMA:"#ff5e62", WORLDCUP:"#e8c84a" };
 const SI  = { NFL:"🏈", NBA:"🏀", MLB:"⚾", NHL:"🏒", MMA:"🥊", WORLDCUP:"⚽" };
-const SGC = { EV:"#cef17b", CONSENSUS:"#22ff99", CONFLUENCE:"#4a9fff", LIABILITY:"#ff8c00" };
+const SGC = { EV:"#cef17b", CONSENSUS:"#22ff99", CONFLUENCE:"#4a9fff", LIABILITY:"#ff8c00", CAPPER_ALIGNED:"#d966ff" };
 const SLOT_SYMBOLS = ["🔒","7️⃣","🍒","💰","⭐","🍀"];
 const RM  = [
   { label:"LOCK #1", emoji:"🥇", border:"#cef17b", glow:"#cef17b33" },

@@ -319,7 +319,7 @@ async function generatePicks(games) {
     `Here are today's real games across every tracked sport/league. For each game, the moneyline, spread, and total are listed ` +
     `with the best-priced book for each side and that side's exact EV vs the blended sharp no-vig line (Pinnacle and/or Circa):\n\n` +
     `${gameLines}\n\n` +
-    `Pick ONLY bets that represent a real, sharp edge — positive EV vs the sharp no-vig line above, and REQUIRE +3% EV or better. Anything below +3% does not qualify, no exceptions. ` +
+    `Pick ONLY bets that represent a real, sharp edge — positive EV vs the sharp no-vig line above, and REQUIRE +3% EV or better, UNLESS the pick instead qualifies via the CAPPER_ALIGNED path defined below (which has its own, looser bar). ` +
     `Moneyline, spread, and total bets are all fair game — pick whichever market shows the strongest genuine edge for a given game.\n` +
     `Return AT MOST 3 bets total, ONE PICK PER GAME — never return the same matchup twice, even at a different book or in a different market. ` +
     `RANKING — rank picks by true win probability and liability conviction FIRST, EV% size SECOND. EV is a qualifying gate (must clear +3%), not what determines which pick is best: a 58% true-probability pick with a liability signal ranks ABOVE a 51% true-probability pick with bigger EV%, even though the bigger-EV pick is "more profitable per dollar" in theory. The goal is winning the individual plays, not just being correct in expectation across many bets.\n` +
@@ -339,6 +339,9 @@ async function generatePicks(games) {
     `HARD REQUIREMENT — every pick must carry at least one corroborating signal beyond raw EV: a CONSENSUS or CONFLUENCE tag, or a liability signal (REVERSE LINE / FROZEN LINE / SHARP/SOFT GAP). ` +
     `A "naked" edge with no tag and no liability signal does NOT qualify, no matter how large its EV% appears — raw EV alone is not sufficient confirmation, it must be corroborated by at least one independent signal. ` +
     `Liability signals are the STRONGER form of corroboration — they reflect actual money movement and book exposure, real independent evidence the side is likely to win, not just a price gap. CONSENSUS/CONFLUENCE are weaker — they're our own pricing model agreeing with itself across markets (moneyline and spread can both be off in the same direction for the same underlying reason), not truly independent confirmation. When choosing between two otherwise-qualifying picks, prefer the one with a liability signal even if its EV is smaller.\n` +
+    `ALTERNATIVE QUALIFYING PATH — CAPPER_ALIGNED: if the MARKET REFERENCE section below (when present) contains a handicapper pick on the EXACT same side as one of the bets in the data above (same team/total and same direction — e.g. their "Pirates ML" matches a "Pittsburgh Pirates" moneyline line here), that bet can qualify WITHOUT needing +3% EV or a CONSENSUS/CONFLUENCE/liability tag, as long as: true probability is roughly 50% or higher (same hard floor as everywhere else), AND its EV is not worse than -5% (i.e. not a catastrophic price — it can be mildly negative by our no-vig math). ` +
+    `This path exists because the handicapper is a real skilled outside predictor — their pick supplies the "who wins" judgment, and our math here is just a sanity check that the price isn't bad, not a requirement that the price itself be favorable. ` +
+    `Tag any pick taken through this path with "signal":"CAPPER_ALIGNED" (not CONSENSUS/CONFLUENCE) so it can be tracked separately. Still respect ONE PICK PER GAME and the 3-bet maximum; a CAPPER_ALIGNED pick fills a slot like any other.\n` +
     `IMPORTANT — systematic-lag warning: if 2 or more of your top candidate picks share the same book AND the same market type (e.g. all run-line/spread edges on FanDuel, or all ML edges on DraftKings), that is a strong indicator of a systematic morning pricing lag at that book rather than independent real edges. ` +
     `In that scenario: select at most 1 pick from that book+market combination (the one with the strongest liability signals), actively look for a pick from a different market or book to ensure variety, and note the lag in your reasoning. ` +
     `Three picks all with identical structure (same book, same market, near-identical EV) is almost never legitimate — be suspicious.\n` +
@@ -363,7 +366,7 @@ async function generatePicks(games) {
     `Return ONLY valid JSON, no markdown, no comments. The "bets" array should contain only as many entries (0-3) as genuinely clear the bar — example shows the shape for 3, trim it down if fewer qualify:\n` +
     `{"date":"${today}","bets":[` +
     `{"rank":1,"sport":"NFL","matchup":"Team A @ Team B","betType":"spread","side":"away","line":6.5,"bet":"Team B +6.5","book":"DraftKings","odds":"+105","ev":"+3.2%","confidence":84,"reasoning":"REVERSE LINE + FROZEN LINE confirm sharp money on the dog. Book needs the favourite.","signal":"CONSENSUS","liability":true},` +
-    `{"rank":2,"sport":"MLB","matchup":"Team C @ Team D","betType":"ml","side":"home","line":null,"bet":"Team D ML","book":"FanDuel","odds":"-108","ev":"+2.9%","confidence":77,"reasoning":"Sharp reasoning.","signal":"CONSENSUS","liability":false},` +
+    `{"rank":2,"sport":"MLB","matchup":"Team C @ Team D","betType":"ml","side":"home","line":null,"bet":"Team D ML","book":"FanDuel","odds":"-130","ev":"-1.8%","confidence":68,"reasoning":"CAPPER_ALIGNED: handicapper has Team D ML, true probability 56% clears the floor, EV is mild (-1.8%) not catastrophic.","signal":"CAPPER_ALIGNED","liability":false},` +
     `{"rank":3,"sport":"NHL","matchup":"Team E @ Team F","betType":"total","side":"under","line":5.5,"bet":"Under 5.5","book":"DraftKings","odds":"-105","ev":"+3.1%","confidence":74,"reasoning":"Sharp reasoning.","signal":"CONFLUENCE","liability":false}]}`;
 
   // Include today's handicapper reference picks as market context if available.
@@ -375,8 +378,8 @@ async function generatePicks(games) {
       `\n\nMARKET REFERENCE — A sharp handicapper service has issued these plays for today. ` +
       `Use them as additional market intelligence: they represent another experienced view of today's value. ` +
       `When they align with a pick already justified by the EV data above, that corroboration strengthens the signal — note it in your reasoning. ` +
-      `When they conflict with your EV analysis, note the discrepancy — do NOT override your EV data just to match them. ` +
-      `Do not pick a game solely because it appears here; EV from the odds data is still the primary filter.\n` +
+      `These reference picks are also eligible for the CAPPER_ALIGNED qualifying path defined earlier: match each reference pick to its exact line in the game data above (same team/total, same direction), then check it against that path's requirements (true probability >= 50%, EV no worse than -5%). ` +
+      `If a reference pick conflicts with your EV analysis or fails those requirements, note the discrepancy and do NOT include it — only take it if it actually clears the CAPPER_ALIGNED bar, do not pick a game solely because it appears here otherwise.\n` +
       `Reference picks:\n${todayCapper.picks}`;
   }
 
