@@ -319,55 +319,41 @@ async function generatePicks(games) {
     `Here are today's real games across every tracked sport/league. For each game, the moneyline, spread, and total are listed ` +
     `with the best-priced book for each side and that side's exact EV vs the blended sharp no-vig line (Pinnacle and/or Circa):\n\n` +
     `${gameLines}\n\n` +
-    `Pick ONLY bets that represent a real, sharp edge — positive EV vs the sharp no-vig line above, and REQUIRE +3% EV or better, UNLESS the pick instead qualifies via the CAPPER_ALIGNED path defined below (which has its own, looser bar). ` +
-    `Moneyline, spread, and total bets are all fair game — pick whichever market shows the strongest genuine edge for a given game.\n` +
-    `Return AT MOST 3 bets total, ONE PICK PER GAME — never return the same matchup twice, even at a different book or in a different market. ` +
-    `RANKING — rank picks by true win probability and liability conviction FIRST, EV% size SECOND. EV is a qualifying gate (must clear +3%), not what determines which pick is best: a 58% true-probability pick with a liability signal ranks ABOVE a 51% true-probability pick with bigger EV%, even though the bigger-EV pick is "more profitable per dollar" in theory. The goal is winning the individual plays, not just being correct in expectation across many bets.\n` +
-    `If only 1 or 2 games today clear the bar, return only those — do NOT pad the list with mediocre or break-even bets just to reach 3. ` +
-    `If genuinely nothing clears the bar, return an empty "bets" array.\n` +
-    `These picks are locked in for the entire day and tracked for real money, so be selective and consistent — ` +
-    `use ONLY the exact odds, points, and EV numbers from the data above.\n` +
-    `Some edges carry tags computed directly from the data, in parentheses after the EV: ` +
-    `CONSENSUS means Pinnacle and Circa INDEPENDENTLY both price this side as +EV (not just on average) — weight these higher. ` +
-    `SPLIT means the two sharp books disagree on direction — treat this EV with caution even if it looks positive. ` +
-    `CONFLUENCE means the moneyline AND spread both favor the same team — two independent markets agreeing the soft book is underpricing them, a strong signal.\n` +
-    `Each edge also shows "true X%" — the blended sharp probability that side actually wins/covers/hits. ` +
-    `American odds are convex, so the SAME probability misestimate produces a much bigger EV% on a plus-money longshot than on a favorite — raw EV% alone is biased toward longshots. ` +
-    `Your job is not just to find +EV, it's to pick winners: REQUIRE true probability of roughly 50% or higher — this is a hard floor, not a preference. ` +
-    `Only take a longshot (true probability under 50%) if its EV is clearly exceptional (+6%+) AND it carries BOTH a CONSENSUS-or-CONFLUENCE tag AND a liability signal — all of that together, not just one. Otherwise skip it, regardless of how big the raw EV% looks. ` +
-    `A card of modest favorites/near-coinflips that are genuinely +EV and likely to hit beats a card of technically-profitable longshots that lose most of the time. The target hit rate is 60%+ — 1-2 elite picks beat 3 mediocre ones every time, so when in doubt, return fewer.\n` +
-    `HARD REQUIREMENT — every pick must carry at least one corroborating signal beyond raw EV: a CONSENSUS or CONFLUENCE tag, or a liability signal (REVERSE LINE / FROZEN LINE / SHARP/SOFT GAP). ` +
-    `A "naked" edge with no tag and no liability signal does NOT qualify, no matter how large its EV% appears — raw EV alone is not sufficient confirmation, it must be corroborated by at least one independent signal. ` +
-    `Liability signals are the STRONGER form of corroboration — they reflect actual money movement and book exposure, real independent evidence the side is likely to win, not just a price gap. CONSENSUS/CONFLUENCE are weaker — they're our own pricing model agreeing with itself across markets (moneyline and spread can both be off in the same direction for the same underlying reason), not truly independent confirmation. When choosing between two otherwise-qualifying picks, prefer the one with a liability signal even if its EV is smaller.\n` +
-    `ALTERNATIVE QUALIFYING PATH — CAPPER_ALIGNED: if the MARKET REFERENCE section below (when present) contains a handicapper pick on the EXACT same side as one of the bets in the data above (same team/total and same direction — e.g. their "Pirates ML" matches a "Pittsburgh Pirates" moneyline line here), that bet can qualify WITHOUT needing +3% EV or a CONSENSUS/CONFLUENCE/liability tag, as long as: true probability is roughly 50% or higher (same hard floor as everywhere else), AND its EV is not worse than -5% (i.e. not a catastrophic price — it can be mildly negative by our no-vig math). ` +
-    `This path exists because the handicapper is a real skilled outside predictor — their pick supplies the "who wins" judgment, and our math here is just a sanity check that the price isn't bad, not a requirement that the price itself be favorable. ` +
-    `Tag any pick taken through this path with "signal":"CAPPER_ALIGNED" (not CONSENSUS/CONFLUENCE) so it can be tracked separately. Still respect ONE PICK PER GAME and the 3-bet maximum; a CAPPER_ALIGNED pick fills a slot like any other.\n` +
-    `IMPORTANT — systematic-lag warning: if 2 or more of your top candidate picks share the same book AND the same market type (e.g. all run-line/spread edges on FanDuel, or all ML edges on DraftKings), that is a strong indicator of a systematic morning pricing lag at that book rather than independent real edges. ` +
-    `In that scenario: select at most 1 pick from that book+market combination (the one with the strongest liability signals), actively look for a pick from a different market or book to ensure variety, and note the lag in your reasoning. ` +
-    `Three picks all with identical structure (same book, same market, near-identical EV) is almost never legitimate — be suspicious.\n` +
-    `Prioritise in this order: (1) true win probability and liability signals, (2) CONSENSUS/CONFLUENCE tags, (3) EV% size, with playoff/high-stakes spots as a tiebreaker. Be skeptical of SPLIT edges and of longshots with true probability under 50%.\n` +
-    `Signal: EV (price value), CONSENSUS (sharp books independently agree), CONFLUENCE (moneyline+spread agree).\n\n` +
-    `Some games show a [LIABILITY: ...] prefix with one or more of these signals computed directly from line-movement data:\n` +
-    `REVERSE LINE — the spread moved toward the underdog since opening despite public money piling on the favourite. ` +
-    `This is the classic sharp-money tell: the book is adjusting to liability, not public action. ` +
-    `"Where's the liability? Who do the books need?" — when the line goes the wrong way, the answer is clear.\n` +
-    `FROZEN LINE — the game is within 5 hours and Pinnacle has not moved the line at all. ` +
-    `The book is standing firm. They like their side and don't need to hedge.\n` +
-    `SHARP/SOFT GAP — Pinnacle and DraftKings/FanDuel have different spread numbers. ` +
-    `The sharp book has already moved; the public book hasn't caught up. ` +
-    `The side with the better number at the soft book is getting a gift — bet them there.\n` +
-    `When REVERSE LINE + FROZEN LINE + SHARP/SOFT GAP all appear on the same game, that is the highest-confidence scenario — ` +
-    `the books need the underdog, sharp money is confirming it, and the public book is still offering the wrong number. ` +
-    `Set liability: true for those picks. A liability spot should rank ahead of a plain +EV pick of similar size.\n\n` +
-    `For each bet set "betType" to "ml", "spread", or "total". Set "side" to "home"/"away" for ml and spread bets, or "over"/"under" for total bets. ` +
-    `Set "line" to the spread/total number shown above (e.g. -4.5, 218.5), or null for ml. ` +
-    `Set "bet" to a short human label matching the format above, e.g. "Lakers +4.5", "Over 218.5", "Celtics ML".\n` +
-    `Set "liability" to true only when the game shows REVERSE LINE and/or FROZEN LINE signals — otherwise false.\n\n` +
-    `Return ONLY valid JSON, no markdown, no comments. The "bets" array should contain only as many entries (0-3) as genuinely clear the bar — example shows the shape for 3, trim it down if fewer qualify:\n` +
+    `YOUR JOB: Return the 3 BEST plays from today's card. Always return exactly 3 bets — ONE PICK PER GAME, never the same matchup twice. ` +
+    `Only return fewer than 3 if today literally has fewer than 3 unstarted games with valid odds. Do NOT return an empty array. Every day has a card.\n` +
+    `Moneyline, spread, and total bets are all in play — pick whichever market gives the strongest case for each game.\n\n` +
+    `HARD FLOORS (the ONLY non-negotiable rules — everything else is ranking preference):\n` +
+    `1. True probability must be 50% or higher — never pick a side the sharp books think is the underdog.\n` +
+    `2. EV must be no worse than -5% — do not take a clearly bad price.\n\n` +
+    `RANKING ORDER — use these to choose WHICH 3 picks to make and in what order (these are preferences, not gates):\n` +
+    `Tier 1 — CAPPER_ALIGNED: handicapper reference matches a line here (see CAPPER_ALIGNED path below) + 50%+ true prob + EV ≥ -5%. These are first priority.\n` +
+    `Tier 2 — Liability + positive EV: game shows a REVERSE LINE, FROZEN LINE, or SHARP/SOFT GAP signal AND the edge is positive EV vs the sharp line. Strongest mathematical + money-flow confirmation.\n` +
+    `Tier 3 — CONSENSUS or CONFLUENCE + positive EV: both sharp books agree (+EV on its own), or ML and spread both favor same team at a soft book.\n` +
+    `Tier 4 — Best available: pick the remaining games with the highest true probability and least-negative EV to complete the card. SPLIT edges or mildly negative EV (down to -5%) are acceptable here if nothing better is available — the goal is a full card every day.\n` +
+    `Within each tier, rank by true probability first, then EV size.\n\n` +
+    `SIGNAL DEFINITIONS:\n` +
+    `CONSENSUS — Pinnacle and Circa INDEPENDENTLY both price this side as +EV (not just on average) — stronger than blended average alone. ` +
+    `SPLIT — the two sharp books disagree on direction — treat EV with caution. ` +
+    `CONFLUENCE — moneyline AND spread both favor the same team — two independent markets agreeing, strong signal.\n\n` +
+    `LIABILITY SIGNALS (appear as [LIABILITY: ...] prefix on each game):\n` +
+    `REVERSE LINE — spread moved toward the underdog since opening despite public money on the favourite. Classic sharp-money tell: books adjusting to liability, not public action.\n` +
+    `FROZEN LINE — game is within 5 hours, Pinnacle has not moved the line at all. Book stands firm — they like their number.\n` +
+    `SHARP/SOFT GAP — Pinnacle and DraftKings/FanDuel have different spread numbers right now. Sharp book moved; public book hasn't caught up — bet the side getting extra points at the soft book.\n` +
+    `When REVERSE LINE + FROZEN LINE + SHARP/SOFT GAP all appear: highest-confidence scenario — set liability:true.\n\n` +
+    `CAPPER_ALIGNED path: if the MARKET REFERENCE section below contains a handicapper pick matching an exact line in the data above (same team/total, same direction), that pick is Tier 1 priority as long as true probability ≥ 50% AND EV ≥ -5%. ` +
+    `The handicapper supplies the "who wins" judgment; our math is just a price sanity check. Tag these picks "signal":"CAPPER_ALIGNED".\n\n` +
+    `SYSTEMATIC-LAG WARNING: if 2+ top picks share the same book AND same market type (e.g. all run-line edges on FanDuel), that likely indicates a morning pricing lag, not independent edges. Pick at most 1 from that book+market combo and find variety elsewhere.\n\n` +
+    `Use ONLY the exact odds, points, and EV numbers from the data above.\n` +
+    `Set "betType" to "ml", "spread", or "total". Set "side" to "home"/"away" for ml/spread, or "over"/"under" for totals. ` +
+    `Set "line" to the spread/total number (e.g. -1.5, 8.5), or null for ml. ` +
+    `Set "bet" to a short human label, e.g. "Cubs ML", "Under 8.5", "Padres +1.5". ` +
+    `Set "signal" to: CONSENSUS, CONFLUENCE, SPLIT, EV, CAPPER_ALIGNED, or LIABILITY (use the strongest tag present). ` +
+    `Set "liability" to true only when REVERSE LINE and/or FROZEN LINE signals are present.\n\n` +
+    `Return ONLY valid JSON, no markdown, no comments:\n` +
     `{"date":"${today}","bets":[` +
-    `{"rank":1,"sport":"NFL","matchup":"Team A @ Team B","betType":"spread","side":"away","line":6.5,"bet":"Team B +6.5","book":"DraftKings","odds":"+105","ev":"+3.2%","confidence":84,"reasoning":"REVERSE LINE + FROZEN LINE confirm sharp money on the dog. Book needs the favourite.","signal":"CONSENSUS","liability":true},` +
+    `{"rank":1,"sport":"NFL","matchup":"Team A @ Team B","betType":"spread","side":"away","line":6.5,"bet":"Team B +6.5","book":"DraftKings","odds":"+105","ev":"+3.2%","confidence":84,"reasoning":"REVERSE LINE + FROZEN LINE confirm sharp money on the dog. Book needs the favourite.","signal":"LIABILITY","liability":true},` +
     `{"rank":2,"sport":"MLB","matchup":"Team C @ Team D","betType":"ml","side":"home","line":null,"bet":"Team D ML","book":"FanDuel","odds":"-130","ev":"-1.8%","confidence":68,"reasoning":"CAPPER_ALIGNED: handicapper has Team D ML, true probability 56% clears the floor, EV is mild (-1.8%) not catastrophic.","signal":"CAPPER_ALIGNED","liability":false},` +
-    `{"rank":3,"sport":"NHL","matchup":"Team E @ Team F","betType":"total","side":"under","line":5.5,"bet":"Under 5.5","book":"DraftKings","odds":"-105","ev":"+3.1%","confidence":74,"reasoning":"Sharp reasoning.","signal":"CONFLUENCE","liability":false}]}`;
+    `{"rank":3,"sport":"NHL","matchup":"Team E @ Team F","betType":"total","side":"under","line":5.5,"bet":"Under 5.5","book":"DraftKings","odds":"-105","ev":"+3.1%","confidence":74,"reasoning":"Best available: CONFLUENCE tag with positive EV, 55% true probability.","signal":"CONFLUENCE","liability":false}]}`;
 
   // Include today's handicapper reference picks as market context if available.
   const capperHistory = loadCapperHistory();
